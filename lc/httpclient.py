@@ -108,6 +108,7 @@ class HttpClient:
         self.timeout = float(timeout)
         self.max_retries = int(max_retries)
         self.limiter = RateLimiter(request_interval, jitter_max)
+        self.on_response = None
 
     def set_session(self, session) -> None:
         self.session = session
@@ -169,6 +170,12 @@ class HttpClient:
                 raise NetworkError(f"{method} {url} failed: {exc}") from exc
 
             response.encoding = "utf-8"
+
+            if self.on_response is not None:
+                try:
+                    self.on_response(response)
+                except Exception as exc:
+                    logger.warning("on_response hook failed: %s", exc)
 
             if response.status_code == 429:
                 retry_after = parse_retry_after(response.headers.get("Retry-After"))

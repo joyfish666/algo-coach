@@ -152,10 +152,33 @@ def configure(cookie_string: str = "", request_interval: float = None, timeout: 
     if timeout is not None:
         client_kwargs["timeout"] = timeout
     new_client = HttpClient(new_session, **client_kwargs)
+    new_client.on_response = lambda response: _persist_rotated_cookies(new_client)
     with _state_lock:
         _session = new_session
         _http_client = new_client
     return _http_client
+
+
+def _persist_rotated_cookies(client) -> None:
+    """Persist session rotation: cn re-issues LEETCODE_SESSION on logins and
+    may rotate it over time; browsers auto-save, so must we — otherwise the
+    on-disk cookie goes stale while the in-memory one works, and vice versa
+    when other processes probe with the old value."""
+    from lc.config import load as load_config, save as save_config
+
+    jar = client.session.cookies
+    session_value = jar.get("LEETCODE_SESSION")
+    csrf_value = jar.get("csrftoken")
+    if not session_value:
+        return
+    new_cookie = f"csrftoken={csrf_value or ''}; LEETCODE_SESSION={session_value}"
+    current = load_config()
+    if current.get("cookie") == new_cookie:
+        return
+    current["cookie"] = new_cookie
+    if csrf_value:
+        current["csrf_token"] = csrf_value
+    save_config(current)
 
 
 def rebuild(cookie_string: str = "", **kwargs):

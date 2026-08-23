@@ -260,7 +260,11 @@ class LeetCodeCnAdapter(SiteAdapter):
         return normalize_check_payload(payload, fallback_submission_id=str(submission_id))
 
     def run_code(self, slug: str, question_id: str, code: str, lang: str, input_text: str) -> dict:
-        """Debug-run via the REST interpret endpoint (never enters history)."""
+        """Debug-run via the REST interpret endpoint (never enters history).
+
+        cn expects the custom cases under `data_input`; multiple cases are
+        simply concatenated with newlines (browser parity).
+        """
         url = LEETCODE_CN_BASE + self.INTERPRET_PATH.format(slug=slug)
         response = self.client.post(
             url,
@@ -269,7 +273,7 @@ class LeetCodeCnAdapter(SiteAdapter):
                 "question_id": str(question_id),
                 "lang": lang,
                 "typed_code": code,
-                "input": input_text,
+                "data_input": input_text,
             },
             headers={
                 "Content-Type": "application/json",
