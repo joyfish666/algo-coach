@@ -9,9 +9,15 @@ problems-sync milestone; findings must be recorded back into PITFALLS.md.
 
 from __future__ import annotations
 
-from lc.auth import GRAPHQL_ENDPOINT, check_response, get_http_client
+from lc.auth import (
+    GRAPHQL_ENDPOINT,
+    LEETCODE_CN_BASE,
+    check_response,
+    get_http_client,
+)
 from lc.exceptions import (
     AuthError,
+    JudgeError,
     NetworkError,
     PremiumProblemError,
     ProblemNotFoundError,
@@ -59,6 +65,7 @@ query problemsetQuestionList($categorySlug: String!, $limit: Int!, $skip: Int!, 
 QUESTION_DETAIL_QUERY = """
 query questionDetailBySlug($titleSlug: String!) {
   question(titleSlug: $titleSlug) {
+    questionId
     questionFrontendId
     titleSlug
     title
@@ -80,6 +87,14 @@ query questionDetailBySlug($titleSlug: String!) {
       name
       nameTranslated
     }
+  }
+}
+"""
+
+INTERPRET_MUTATION = """
+mutation interpretSolutionRun($id: ID!, $code: String!, $lang: String!, $input: String!) {
+  interpretSolution(id: $id, code: $code, lang: $lang, input: $input) {
+    interpretId
   }
 }
 """
@@ -110,6 +125,9 @@ query todayQuestionRecord {
 class LeetCodeCnAdapter(SiteAdapter):
     name = "leetcode.cn"
 
+    SUBMIT_PATH = "/problems/{slug}/submit/"
+    CHECK_PATH = "/submissions/detail/{sid}/check/"
+
     def __init__(self, client=None):
         self._client = client
 
@@ -121,7 +139,7 @@ class LeetCodeCnAdapter(SiteAdapter):
             raise NetworkError(t("cookie_missing"))
         return self._client
 
-    def _graphql(self, operation_name: str, query: str, variables: dict = None) -> dict:
+    def _graphql(self, operation_name: str, query: str, variables: dict = None, *, idempotent: bool = True) -> dict:
         payload = {
             "operationName": operation_name,
             "query": " ".join(query.split()),
@@ -129,7 +147,7 @@ class LeetCodeCnAdapter(SiteAdapter):
         }
         response = self.client.post(
             GRAPHQL_ENDPOINT,
-            idempotent=True,
+            idempotent=idempotent,
             json=payload,
             headers={"Content-Type": "application/json"},
         )
@@ -202,6 +220,71 @@ class LeetCodeCnAdapter(SiteAdapter):
             summary["date"] = str(date)
         return summary
 
+    def submit_code(self, slug: str, question_id: str, code: str, lang: str) -> str:
+        """Formal submission; returns submission_id. Never auto-retried."""
+        url = LEETCODE_CN_BASE + self.SUBMIT_PATH.format(slug=slug)
+        response = self.client.post(
+            url,
+            idempotent=False,
+            json={"lang": lang, "question_id": str(question_id), "typed_code": code},
+            headers={
+                "Content-Type": "application/json",
+                "X-CSRFToken": self._csrf_token(),
+                "Referer": f"{LEETCODE_CN_BASE}/problems/{slug}/",
+            },
+        )
+        check_response(response, context="submit")
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise NetworkError("submit: response is not valid JSON") from exc
+        submission_id = payload.get("submission_id") if isinstance(payload, dict) else None
+        if submission_id is None:
+            raise NetworkError(
+                "submit: missing submission_id",
+                detail={"payload_keys": sorted(payload) if isinstance(payload, dict) else []},
+            )
+        return str(submission_id)
+
+    def poll_submission(self, submission_id: str) -> dict:
+        url = LEETCODE_CN_BASE + self.CHECK_PATH.format(sid=submission_id)
+        response = self.client.get(url, idempotent=True)
+        check_response(response, context="check")
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise NetworkError("check: response is not valid JSON") from exc
+        return normalize_check_payload(payload, fallback_submission_id=str(submission_id))
+
+    def run_code(self, slug: str, question_id: str, code: str, lang: str, input_text: str) -> dict:
+        """Interpret solution remotely (does not enter submission history)."""
+        variables = {
+            "id": str(question_id),
+            "code": code,
+            "lang": lang,
+            "input": input_text,
+        }
+        data = self._graphql(
+            "interpretSolutionRun", INTERPRET_MUTATION, variables, idempotent=False
+        )
+        output = data.get("interpretSolution")
+        interpret_id = None
+        if isinstance(output, dict):
+            interpret_id = output.get("interpretId") or output.get("interpret_id")
+        if not interpret_id:
+            raise JudgeError(
+                "interpretSolution: missing interpretId",
+                detail={"keys": sorted(output) if isinstance(output, dict) else []},
+            )
+        return self.poll_submission(str(interpret_id))
+
+    def _csrf_token(self) -> str:
+        try:
+            return self.client.session.cookies.get("csrftoken") or ""
+        except AttributeError:
+            token = self.client.default_headers.get("X-CSRFToken", "")
+            return token
+
 
 def normalize_tag(raw) -> dict:
     if not isinstance(raw, dict):
@@ -268,6 +351,7 @@ def normalize_question_detail(raw) -> dict:
         )
     detail.update(
         {
+            "internal_question_id": str(raw.get("questionId", "") or ""),
             "statement_html": str(statement),
             "hints": [str(hint) for hint in (raw.get("hints") or [])],
             "sample_test_case": str(raw.get("sampleTestCase", "") or ""),
@@ -275,3 +359,103 @@ def normalize_question_detail(raw) -> dict:
         }
     )
     return detail
+
+
+_STATUS_KEY_RULES = (
+    ("accept", "accepted"),
+    ("wrong answer", "wrong_answer"),
+    ("compile", "compile_error"),
+    ("runtime error", "runtime_error"),
+    ("time limit", "tle"),
+    ("memory limit", "mle"),
+    ("output limit", "ole"),
+)
+
+
+def _classify_status(status_msg, run_success) -> str:
+    text = str(status_msg or "").strip().lower()
+    if not text and run_success:
+        return "accepted"
+    for marker, key in _STATUS_KEY_RULES:
+        if marker in text:
+            return key
+    if text == "finished" and run_success:
+        return "accepted"
+    return "unknown"
+
+
+def humanize_bytes(num) -> str:
+    try:
+        value = float(num)
+    except (TypeError, ValueError):
+        return ""
+    for unit in ("B", "KB", "MB"):
+        if value < 1024:
+            return f"{value:.0f} {unit}" if unit == "B" else f"{value:.1f} {unit}"
+        value /= 1024
+    return f"{value:.1f} GB"
+
+
+def normalize_check_payload(payload: dict, *, fallback_submission_id: str = "") -> dict:
+    """Single-point normalization of submission/interpret check payloads.
+
+    Classification relies on the human-readable status_msg first so that
+    status-code drift between sites degrades gracefully instead of crashing.
+    """
+    if not isinstance(payload, dict):
+        raise NetworkError("check payload is not an object")
+    state = str(payload.get("state", "") or "").upper()
+    finished = state == "FINISHED" or "status_msg" in payload and state != "STARTED"
+    status_code = payload.get("status_code")
+    run_success = bool(payload.get("run_success"))
+    runtime = payload.get("runtime")
+    runtime_display = payload.get("runtime_display") or (
+        f"{runtime} ms" if isinstance(runtime, (int, float)) else ""
+    )
+    memory = payload.get("memory")
+    memory_display = payload.get("memory_display") or humanize_bytes(memory)
+    verdict = {
+        "finished": finished,
+        "raw_state": state,
+        "raw_status_code": status_code,
+        "status_key": _classify_status(payload.get("status_msg"), run_success)
+        if finished
+        else None,
+        "status_msg": str(payload.get("status_msg", "") or ""),
+        "runtime_display": runtime_display,
+        "runtime_percentile": _optional_number(payload.get("runtime_percentile")),
+        "memory_display": memory_display,
+        "memory_percentile": _optional_number(payload.get("memory_percentile")),
+        "total_correct": payload.get("total_correct"),
+        "total_testcases": payload.get("total_testcases"),
+        "outputs": _string_list(payload.get("code_answer")),
+        "expected_outputs": _string_list(payload.get("expected_output")),
+        "stdout_tail": _join_stdout(payload.get("std_output_list")),
+        "compile_error": str(payload.get("compile_error", "") or ""),
+        "runtime_error": str(payload.get("runtime_error", "") or payload.get("full_runtime_error", "") or ""),
+        "submission_id": str(payload.get("submission_id", "") or fallback_submission_id),
+    }
+    return verdict
+
+
+def _optional_number(value):
+    try:
+        return round(float(value), 1) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _string_list(value):
+    if not value:
+        return []
+    if isinstance(value, list):
+        return [str(item) for item in value]
+    return [str(value)]
+
+
+def _join_stdout(lines):
+    if not lines:
+        return ""
+    if isinstance(lines, list):
+        return "\n".join(str(line) for line in lines[-40:])
+    return str(lines)

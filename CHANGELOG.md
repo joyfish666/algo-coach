@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Answering workbench (stage 4): judge pipeline with save-before-judge semantics, run mode via
+  the remote interpret flow that never enters submission history, submit mode with bounded
+  polling (120s) handling intermediate states and an explicit status-unknown verdict carrying the
+  traceable submission_id after timeout plus one final detail lookup; rich result normalization
+  classifying verdicts from human-readable messages with runtime/memory percentiles, WA expected/
+  actual comparison arrays, CE details and RE output; server endpoints for run, submit and editor
+  code persistence; frontend workbench rendering the converted statement through markdown-it with
+  HTML escaped, tag/difficulty chips, collapsible hints, language switching that fetches missing
+  templates on demand, debounced autosave plus localStorage draft snapshots (LRU-capped at twenty)
+  with restore prompts, an in-flight-guarded Run/Submit button pair, a custom-testcases panel
+  writing back to testcases.txt for local-input runs, and a verdict panel showing big-status,
+  beat percentages, WA diff table and collapsible CE/RE/stdout blocks.
 - Frontend skeleton (stage 3): a zh/en i18n store with browser-locale detection and localStorage
   persistence, a backend status store consumed by the route guard (unconfigured visitors land on
   the setup page; an unreachable backend degrades gracefully), a redesigned sidebar with

@@ -12,7 +12,7 @@
 | 1 | lc 核心：config / auth / i18n / logutil / exceptions / langs / httpclient / sites.cn | ✅ 已完成 |
 | 2 | problems + server API（题库同步、缓存、续传） | ✅ 已完成 |
 | 3 | 前端骨架：tokens.css 双主题 / 侧边栏布局 / router / ThemeSwitch / i18n / 路由守卫 | ✅ 已完成 |
-| 4 | 答题工作台：ProblemDetail + CodeEditor + Run/Submit + 结果面板 + 自定义用例面板 | ⬜ 待实施 |
+| 4 | 答题工作台：ProblemDetail + CodeEditor + Run/Submit + 结果面板 + 自定义用例面板 | ◐ 已实现，待真网实测（two-sum 全流程 + 剑指 Offer slug 路由） |
 | 5 | 题库列表页 + setup 向导 + daily | ⬜ 待实施 |
 | 6 | archive + llm + analyze + AI 侧边栏 | ⬜ 待实施 |
 | 7 | 文档全套 + 测试补齐 + 打磨（含安装态 dist 定位验收） | ⬜ 待实施 |

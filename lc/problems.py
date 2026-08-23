@@ -484,6 +484,10 @@ def open_problem(detail: dict, workspace_root=None, default_language: str = DEFA
     if not testcases_path.exists():
         _write_protected(testcases_path, detail.get("sample_test_case", "") or "", meta, "testcases")
 
+    internal_id = str(detail.get("internal_question_id", "") or "")
+    if internal_id:
+        meta["internal_question_id"] = internal_id
+
     lang_snippets = snippets_by_lang(detail)
     template_code = lang_snippets.get(default_language)
     if template_code is not None:
@@ -553,6 +557,17 @@ def save_testcases(directory: Path, content: str) -> None:
     (directory / "testcases.txt").write_text(content, encoding="utf-8")
 
 
+def save_solution(directory: Path, language: str, code: str) -> Path:
+    """Write editor content before judging; deliberately does NOT touch
+    meta.json hashes so refresh still treats this as user-owned content."""
+    ext = extension_for(language)
+    if ext is None:
+        raise ValueError(f"unsupported language: {language}")
+    path = directory / f"solution{ext}"
+    path.write_text(code, encoding="utf-8")
+    return path
+
+
 def available_languages(directory: Path) -> list:
     reverse = {ext: slug for slug, ext in LANGUAGE_REGISTRY.items()}
     found = []
@@ -584,6 +599,9 @@ def read_problem_state(directory: Path, default_language: str = DEFAULT_LANGUAGE
             cases = json.loads(cases_path.read_text(encoding="utf-8")).get("cases", [])
         except (json.JSONDecodeError, OSError):
             cases = []
+    solution_mtime = 0.0
+    if solution_path is not None and solution_path.exists():
+        solution_mtime = solution_path.stat().st_mtime
     return {
         "statement_markdown": statement,
         "code": code,
@@ -591,6 +609,7 @@ def read_problem_state(directory: Path, default_language: str = DEFAULT_LANGUAGE
         "languages_available": available_languages(directory),
         "testcases": testcases,
         "cases": cases,
+        "solution_mtime": solution_mtime,
     }
 
 

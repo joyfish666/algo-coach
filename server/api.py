@@ -14,6 +14,7 @@ Layer rules:
 
 from __future__ import annotations
 
+import json
 import threading
 
 from fastapi import FastAPI, HTTPException, Request
@@ -22,7 +23,7 @@ from pydantic import BaseModel
 from urllib.parse import urlparse
 
 import lc
-from lc import auth, problems
+from lc import auth, judge, problems
 from lc.config import effective_config, save as save_config, workspace_root_path
 from lc.exceptions import (
     AlgoCoachError,
@@ -359,3 +360,108 @@ def put_testcases(qid: str, payload: TestcasesPayload):
         raise HTTPException(status_code=404, detail=t("problem_not_found"))
     problems.save_testcases(directory, payload.content)
     return {"slug": qid, "saved": True}
+
+
+class SolutionPayload(BaseModel):
+    lang: str
+    code: str
+
+
+@app.put("/api/problem/{qid}/solution")
+def put_solution(qid: str, payload: SolutionPayload):
+    if not is_supported(payload.lang):
+        raise HTTPException(status_code=422, detail=f"unsupported language: {payload.lang}")
+    workspace = _workspace_root()
+    directory = problems.find_problem_dir(workspace, qid)
+    if directory is None:
+        raise HTTPException(status_code=404, detail=t("problem_not_found"))
+    path = problems.save_solution(directory, payload.lang, payload.code)
+    return {"slug": qid, "lang": payload.lang, "saved": True, "mtime": path.stat().st_mtime}
+
+
+def _resolve_judge_context(slug: str) -> tuple:
+    workspace = _workspace_root()
+    directory = problems.find_problem_dir(workspace, slug)
+    if directory is None:
+        raise HTTPException(status_code=404, detail=t("problem_not_found"))
+    meta = problems.load_meta(directory)
+    question_id = str(meta.get("internal_question_id", "") or "")
+    if not question_id:
+        detail = create_adapter().fetch_question_detail(slug)
+        question_id = str(detail.get("internal_question_id", "") or "")
+    frontend_row = next(
+        (
+            p
+            for p in problems.load_problems()["problems"]
+            if p.get("slug") == slug
+        ),
+        {},
+    )
+    frontend_id = str(frontend_row.get("frontend_id", "") or "")
+    return directory, question_id or frontend_id or slug
+
+
+class JudgeRunPayload(BaseModel):
+    qid: str
+    lang: str
+    code: str
+    use_local: bool = False
+
+
+@app.post("/api/judge/run")
+def judge_run_endpoint(payload: JudgeRunPayload):
+    if not is_supported(payload.lang):
+        raise HTTPException(status_code=422, detail=f"unsupported language: {payload.lang}")
+    directory, question_id = _resolve_judge_context(payload.qid)
+
+    if payload.use_local:
+        testcases_path = directory / "testcases.txt"
+        input_text = (
+            testcases_path.read_text(encoding="utf-8") if testcases_path.exists() else ""
+        )
+    else:
+        cases_path = directory / "cases.json"
+        inputs = []
+        if cases_path.exists():
+            try:
+                cases = json.loads(cases_path.read_text(encoding="utf-8")).get("cases", [])
+                inputs = cases[0].get("inputs", []) if cases else []
+            except (json.JSONDecodeError, OSError):
+                inputs = []
+        input_text = "\n".join(inputs)
+
+    problems.save_solution(directory, payload.lang, payload.code)
+    verdict = judge.judge_run(
+        create_adapter(),
+        slug=payload.qid,
+        question_id=question_id,
+        code=payload.code,
+        lang=payload.lang,
+        input_text=input_text,
+    )
+    verdict["mode"] = "run"
+    verdict["input"] = input_text
+    return verdict
+
+
+class JudgeSubmitPayload(BaseModel):
+    qid: str
+    lang: str
+    code: str
+
+
+@app.post("/api/judge/submit")
+def judge_submit_endpoint(payload: JudgeSubmitPayload):
+    if not is_supported(payload.lang):
+        raise HTTPException(status_code=422, detail=f"unsupported language: {payload.lang}")
+    directory, question_id = _resolve_judge_context(payload.qid)
+    problems.save_solution(directory, payload.lang, payload.code)
+    verdict = judge.judge_submit(
+        create_adapter(),
+        slug=payload.qid,
+        question_id=question_id,
+        code=payload.code,
+        lang=payload.lang,
+    )
+    verdict["mode"] = "submit"
+    return verdict
