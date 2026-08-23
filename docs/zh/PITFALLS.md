@@ -15,8 +15,12 @@
   - 每日一题：`todayRecord { date question { … } }`，question 无 topicTags
   - 站内提交列表：**不存在 `recentSubmissionList`**；用 `submissionList(limit, offset) { hasNext lastKey submissions { id statusDisplay lang runtime timestamp url title } }`（节点 `SubmissionDumpNode` 无 titleSlug，slug 从 url `/problems/<slug>/` 正则提取）；未登录返回**空列表而非报错**
   - REST `/api/submissions/` 存在但需有效会话（401 JSON）
-  - 判定 submit/interpret 形态仍未实测（需有效会话），维持「status_msg 文本优先分类」策略，实测后回填
-- **会话轮换陷阱**：重新登录 leetcode.cn 会使旧的 LEETCODE_SESSION 在服务端立即失效——本地 Cookie 文件再完好也无法通过校验；用户报「明明复制对了却提示失效」时优先怀疑此因，请以最新一次登录后复制的为准。
+  - 判定接口【已真网回填】：submit 走 REST `POST /problems/{slug}/submit/` → 轮询
+    `/submissions/detail/{id}/check/`；run 走 REST `POST /problems/{slug}/interpret_solution/`，
+    **自定义用例字段名是 `data_input`**（多组用例直接换行拼接，浏览器同款）——曾因误用
+    `input` 触发站点 Internal Error；轮询响应可能缺少 state/status_msg，完成判定需回退到
+    code_answer/compile_error 等强标志字段
+- **会话轮换陷阱**：重新登录 leetcode.cn 会使旧的 LEETCODE_SESSION 在服务端立即失效——本地 Cookie 文件再完好也无法通过校验；用户报「明明复制对了却提示失效」时优先怀疑此因，请以最新一次登录后复制的为准。后端已实现轮换自动持久化（响应下发新 Cookie 时写回 config.toml），但**出口 IP 变化仍会触发轮换**——JWT 内含 IP 字段，动态 IP/热点/代理切换用户需重新复制。
 - **Windows 上 os.kill(pid, 0) 会杀进程**：CPython 在 Windows 把非 CTRL 信号一律走 TerminateProcess，信号 0 也不例外。进程存活探测必须用 ctypes `OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION)` + `GetExitCodeProcess == STILL_ACTIVE(259)`（见 cli.py `_pid_alive`）。
 - **打包后 dist 定位链**：`ALGOCOACH_DIST` → 向上搜索仓库 `web/dist`（可编辑安装/源码态）→ 安装目录内 `server/webdist`（wheel 态，发布前需 npm build 后拷贝，package-data 打包）。三处都未命中则 API-only 模式，根路径返回 JSON 提示。
 - **console_script 监听者是 python.exe**：Windows 下 pip 生成的 coach.exe 只是启动器，真正监听端口的进程名是 python——按端口清理进程时勿只匹配 coach.exe。

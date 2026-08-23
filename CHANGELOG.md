@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Debug-run payload field corrected to `data_input` (matching the browser), which was the cause
+  of site-side Internal Error on Run; interpret check responses lacking state/status_msg now
+  count as finished via strong result markers, and compile/runtime errors classify properly.
+- Session rotation: rotated LEETCODE_SESSION/csrftoken values returned by the site are persisted
+  back to config automatically, so the backend stops fighting the browser over the newest value.
+
+### Verified
+
+- Full live round with a real session: sync of all 4421 problems across 45 pages without errors;
+  two-sum Run and Submit with rich verdicts (65/65 accepted); daily problem; site import
+  (17 imported, 3 deduped); analytics stats, SVG tag-mastery chart and recommendations.
+
 - Live-network schema corrections for leetcode.cn (verified with a real session on 2026-08-23):
   the problem-list query now calls `problemsetQuestionList` directly and reads
   QuestionLightNode fields (`paidOnly`, `frontendQuestionId`, `nameTranslated` tags) instead of

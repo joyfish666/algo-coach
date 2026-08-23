@@ -59,11 +59,14 @@ POST /api/judge/run                 {qid, lang, code, use_local?} 先落盘再�
 POST /api/judge/submit              {qid, lang, code} 阻塞长轮询至判定完成或超时；
                                     完成后自动归档；超时走「结果未知」路径并归档
 GET  /api/archive/recent            本地归档最近记录
-POST /api/archive/import-site       recentSubmissionList 导入（≤20 条边界，去重键 = submission_id）
+POST /api/archive/import-site       submissionList 导入（≤20 条边界，去重键 = submission_id）
 POST /api/ask                       无状态问答 {question, history?, qid}——题目与最近判定自动入上下文
 POST /api/analyze                   解题统计 + 标签掌握度 + 推荐 + AI 报告（use_llm 可关）
+DELETE /api/local-data              清除全部本地数据（题库缓存/归档/工作区/配置），
+                                    同步进行中返回 409；保留运行中的 instance.lock
 
 GET  /{path}                        前端托管：命中 dist 文件直出，SPA 深链回退 index.html；
+                                    index.html no-cache、哈希资源 immutable 长缓存；
                                     未构建 dist 时为 API-only 模式
 ```
 
@@ -76,5 +79,7 @@ GET  /{path}                        前端托管：命中 dist 文件直出，SP
 
 ## 已知能力边界
 
-- recentSubmissionList 仅能取最近约 20 条。
+- 站内提交列表（submissionList）仅能取最近约 20 条。
 - v0.1 题面公式原文展示、图片断网失效（见 ROADMAP）。
+- 调试运行（interpret_solution）偶发站点侧 Internal Error，属 leetcode.cn
+  调试服务不稳定；前端会显示「调试服务暂不可用」提示，稍后重试即可。
