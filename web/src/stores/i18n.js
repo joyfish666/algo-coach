@@ -100,6 +100,12 @@ export const MESSAGES = {
     setup_step_cookie: '粘贴 Cookie',
     setup_step_llm: 'AI 配置（可跳过）',
     setup_step_prefs: '偏好设置',
+    setup_mode_simple: '简易模式（推荐）',
+    setup_mode_advanced: '整串粘贴（高级）',
+    cookie_guide:
+      '① 浏览器登录 leetcode.cn → ② 按 F12 打开开发者工具 → ③ 切到「应用 / Application」标签 → ④ 左侧「存储」展开 Cookie，点击 https://leetcode.cn → ⑤ 在表格里找到下面两行，双击「值」列全选复制粘贴过来',
+    field_leetcode_session: 'LEETCODE_SESSION',
+    field_csrftoken: 'csrftoken',
     cookie_hint: '浏览器登录 leetcode.cn 后：F12 → 网络(Network) → 点任意请求 → 复制整串 Cookie 粘贴到下面',
     validate: '校验',
     validating: '校验中…',
@@ -237,6 +243,12 @@ export const MESSAGES = {
     setup_step_cookie: 'Paste cookie',
     setup_step_llm: 'AI config (optional)',
     setup_step_prefs: 'Preferences',
+    setup_mode_simple: 'Simple (recommended)',
+    setup_mode_advanced: 'Whole-string paste (advanced)',
+    cookie_guide:
+      '① Log in at leetcode.cn → ② Press F12 → ③ Open the "Application" tab → ④ Under Storage expand Cookies and click https://leetcode.cn → ⑤ Find the two rows below, double-click the Value cell, copy and paste here',
+    field_leetcode_session: 'LEETCODE_SESSION',
+    field_csrftoken: 'csrftoken',
     cookie_hint:
       'Log in at leetcode.cn, press F12 → Network → pick any request → copy the whole Cookie header below',
     validate: 'Validate',

@@ -21,6 +21,9 @@
 
 ## v0.x
 
+- **浏览器扩展一键同步 Cookie【延】**：LEETCODE_SESSION 为 HttpOnly，网页脚本读不到，
+  纯 Web 向导无法全自动获取登录态；评估做 leetcode.cn 浏览器扩展把 Cookie 推送到
+  本地服务，实现「登录即配置」。
 - **语言注册表扩充**（按行添加）。**Go 语言支持【延】**：CodeMirror 官方无
   `@codemirror/lang-go` 包，为保持依赖政策纯净不为单一语言引入 pinned 社区包；
   待官方包出现或明确批准社区包后再加入；届时仍不可行则以 plain text 降级。

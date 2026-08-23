@@ -14,6 +14,9 @@ const router = useRouter()
 
 const step = ref(1)
 
+const advancedMode = ref(false)
+const sessionValue = ref('')
+const csrfValue = ref('')
 const cookieInput = ref('')
 const validating = ref(false)
 const cookieOk = ref(false)
@@ -40,17 +43,25 @@ const steps = computed(() => [
   i18n.t('setup_step_prefs'),
 ])
 
+const composedCookie = computed(() => {
+  if (advancedMode.value) return cookieInput.value.trim()
+  const parts = []
+  if (sessionValue.value.trim()) parts.push(`LEETCODE_SESSION=${sessionValue.value.trim()}`)
+  if (csrfValue.value.trim()) parts.push(`csrftoken=${csrfValue.value.trim()}`)
+  return parts.join('; ')
+})
+
 function resetCookieState() {
   cookieOk.value = false
   cookieError.value = ''
 }
 
 async function validateAndNext() {
-  if (!cookieInput.value.trim() || validating.value) return
+  if (!composedCookie.value || validating.value) return
   validating.value = true
   cookieError.value = ''
   try {
-    await api.validateCookie(cookieInput.value.trim())
+    await api.validateCookie(composedCookie.value)
     cookieOk.value = true
     setTimeout(() => {
       if (cookieOk.value) goStep(2)
@@ -86,7 +97,7 @@ async function finish() {
   finishing.value = true
   finishError.value = ''
   const payload = {
-    cookie: cookieInput.value.trim(),
+    cookie: composedCookie.value,
     default_language: codingLang.value,
   }
   if (llmProvided()) {
@@ -129,16 +140,63 @@ async function finish() {
       </ol>
 
       <section v-if="step === 1" class="step-body">
-        <span class="field-label">Cookie</span>
-        <textarea
-          v-model="cookieInput"
-          class="input cookie-input mono"
-          rows="4"
-          spellcheck="false"
-          :placeholder="i18n.t('cookie_hint')"
-          data-testid="cookie-input"
-          @input="resetCookieState"
-        ></textarea>
+        <div class="mode-tabs">
+          <button
+            type="button"
+            :class="{ active: !advancedMode }"
+            @click="advancedMode = false; resetCookieState()"
+          >
+            {{ i18n.t('setup_mode_simple') }}
+          </button>
+          <button
+            type="button"
+            :class="{ active: advancedMode }"
+            @click="advancedMode = true; resetCookieState()"
+          >
+            {{ i18n.t('setup_mode_advanced') }}
+          </button>
+        </div>
+
+        <template v-if="!advancedMode">
+          <p class="guide-text">{{ i18n.t('cookie_guide') }}</p>
+          <div class="field">
+            <span class="field-label">{{ i18n.t('field_leetcode_session') }}</span>
+            <input
+              v-model="sessionValue"
+              class="input wide mono-input"
+              type="password"
+              autocomplete="off"
+              spellcheck="false"
+              data-testid="session-input"
+              @input="resetCookieState"
+            />
+          </div>
+          <div class="field">
+            <span class="field-label">{{ i18n.t('field_csrftoken') }}</span>
+            <input
+              v-model="csrfValue"
+              class="input wide mono-input"
+              type="password"
+              autocomplete="off"
+              spellcheck="false"
+              data-testid="csrf-input"
+              @input="resetCookieState"
+            />
+          </div>
+        </template>
+
+        <template v-else>
+          <span class="field-label">Cookie</span>
+          <textarea
+            v-model="cookieInput"
+            class="input cookie-input mono"
+            rows="4"
+            spellcheck="false"
+            :placeholder="i18n.t('cookie_hint')"
+            data-testid="cookie-input"
+            @input="resetCookieState"
+          ></textarea>
+        </template>
 
         <p v-if="validating" class="msg">{{ i18n.t('validating') }}</p>
         <p v-else-if="cookieOk" class="msg ok" data-testid="cookie-valid">{{ i18n.t('cookie_valid') }}</p>
@@ -149,7 +207,7 @@ async function finish() {
           <button
             class="btn btn-primary"
             type="button"
-            :disabled="!cookieInput.trim() || validating || !cookieOk"
+            :disabled="!composedCookie || validating || !cookieOk"
             data-testid="cookie-next"
             @click="goStep(2)"
           >
@@ -281,6 +339,47 @@ async function finish() {
 .cookie-input {
   width: 100%;
   resize: vertical;
+}
+
+.mode-tabs {
+  display: flex;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-pill);
+  overflow: hidden;
+  margin-bottom: var(--space-4);
+}
+
+.mode-tabs button {
+  background: transparent;
+  border: none;
+  color: var(--gray-neutral);
+  flex: 1;
+  font-size: var(--font-size-caption);
+  padding: var(--space-2) var(--space-3);
+}
+
+.mode-tabs button + button {
+  border-left: 1px solid var(--border-subtle);
+}
+
+.mode-tabs button.active {
+  background: var(--accent);
+  color: #ffffff;
+}
+
+.guide-text {
+  background: var(--bg-secondary);
+  border-radius: var(--radius-card);
+  color: var(--gray-neutral);
+  font-size: var(--font-size-caption);
+  line-height: 1.8;
+  margin: 0 0 var(--space-4);
+  padding: var(--space-3) var(--space-4);
+}
+
+.mono-input {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: var(--font-size-caption);
 }
 
 .mono {

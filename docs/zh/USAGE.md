@@ -31,7 +31,15 @@ coach
 
 ## /setup 向导
 
-分步配置：粘贴 Cookie（后端即时校验有效性）→ LLM Key/URL（可跳过）→ 刷题语言与主题选择。
+分步配置：
+
+1. **Cookie**：默认简易模式只需填两个值——浏览器登录 leetcode.cn 后按 F12 →
+   「应用/Application」→ 存储 → Cookie → https://leetcode.cn，把 `LEETCODE_SESSION`
+   和 `csrftoken` 两行的「值」分别复制粘贴进来，点校验通过后下一步；
+   也可切换「整串粘贴」模式直接贴完整 Cookie 头。
+2. **LLM 配置（可跳过）**：API Key / 接口地址 / 模型名，留空跳过则暂不启用 AI 功能。
+3. **偏好**：默认刷题语言与界面主题。
+
 Cookie 失效后任意页面会弹出底部横幅引导重新配置，也可在设置页点击「更新 Cookie」。
 
 ## 页面说明
