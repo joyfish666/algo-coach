@@ -4,6 +4,13 @@ import { useRoute } from 'vue-router'
 
 import LanguageSwitch from './components/LanguageSwitch.vue'
 import ThemeSwitch from './components/ThemeSwitch.vue'
+import {
+  debugClear,
+  debugCopyToClipboard,
+  debugEnabled,
+  debugEntries,
+  setDebugEnabled,
+} from './debug'
 import { useI18nStore } from './stores/i18n'
 import { useStatusStore } from './stores/status'
 import { useThemeStore } from './stores/theme'
@@ -14,6 +21,15 @@ const theme = useThemeStore()
 const route = useRoute()
 
 const authExpired = ref(false)
+const copied = ref(false)
+
+async function copyDebugLogs() {
+  const ok = await debugCopyToClipboard()
+  if (ok) {
+    copied.value = true
+    setTimeout(() => (copied.value = false), 1500)
+  }
+}
 
 function onAuthExpired() {
   authExpired.value = true
@@ -107,6 +123,24 @@ watch(
     <main class="content">
       <RouterView />
     </main>
+
+    <div v-if="debugEnabled" class="debug-bar" data-testid="debug-bar">
+      <span class="debug-count">DEBUG · {{ debugEntries.length }}</span>
+      <button class="btn btn-ghost btn-xs" type="button" @click="copyDebugLogs">
+        {{ copied ? i18n.t('debug_copied') : i18n.t('debug_copy') }}
+      </button>
+      <button class="btn btn-ghost btn-xs" type="button" @click="debugClear()">
+        {{ i18n.t('debug_clear') }}
+      </button>
+      <button
+        class="btn btn-ghost btn-xs"
+        type="button"
+        data-testid="debug-off"
+        @click="setDebugEnabled(false)"
+      >
+        {{ i18n.t('debug_off') }}
+      </button>
+    </div>
 
     <div v-if="authExpired" class="auth-banner" data-testid="auth-expired-banner">
       <span>{{ i18n.t('cookie_invalid') }}</span>
@@ -218,7 +252,28 @@ nav {
   z-index: 50;
 }
 
-.btn-sm {
-  padding: var(--space-1) var(--space-4);
+.debug-bar {
+  align-items: center;
+  background: var(--bg-secondary);
+  border: 1px dashed var(--gray-neutral);
+  border-radius: var(--radius-pill);
+  bottom: var(--space-2);
+  display: flex;
+  gap: var(--space-2);
+  left: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  position: fixed;
+  z-index: 60;
+}
+
+.debug-count {
+  color: var(--accent);
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 11px;
+}
+
+.btn-xs {
+  font-size: 11px;
+  padding: 0 var(--space-2);
 }
 </style>

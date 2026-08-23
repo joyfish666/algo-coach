@@ -122,22 +122,8 @@ function onEnter(event) {
 </script>
 
 <template>
-  <button
-    v-if="!open"
-    class="fab"
-    type="button"
-    :title="i18n.t('ai_title')"
-    data-testid="ai-open"
-    @click="toggle"
-  >
-    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M12 3.5c2.2 2.8 4.4 4.2 7.5 5-3.1 0.8-5.3 2.2-7.5 5-2.2-2.8-4.4-4.2-7.5-5 3.1-0.8 5.3-2.2 7.5-5z" />
-      <path d="M18.5 15.5c0.9 1.2 1.9 1.8 3.2 2.1-1.3 0.3-2.3 0.9-3.2 2.1-0.9-1.2-1.9-1.8-3.2-2.1 1.3-0.3 2.3-0.9 3.2-2.1z" />
-    </svg>
-    <span class="fab-label">{{ i18n.t('ai_open') }}</span>
-  </button>
-
   <aside
+    v-if="open"
     ref="panelEl"
     class="panel card"
     :style="pos ? { left: pos.x + 'px', top: pos.y + 'px', right: 'auto' } : {}"
@@ -183,6 +169,21 @@ function onEnter(event) {
       </button>
     </footer>
   </aside>
+
+  <button
+    v-else
+    class="fab"
+    type="button"
+    :title="i18n.t('ai_title')"
+    data-testid="ai-open"
+    @click="toggle"
+  >
+    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12 3.5c2.2 2.8 4.4 4.2 7.5 5-3.1 0.8-5.3 2.2-7.5 5-2.2-2.8-4.4-4.2-7.5-5 3.1-0.8 5.3-2.2 7.5-5z" />
+      <path d="M18.5 15.5c0.9 1.2 1.8 2.1 3.2 2.1-1.3 0.3-2.3 0.9-3.2 2.1-0.9-1.2-1.9-1.8-3.2-2.1 1.3-0.3 2.3-0.9 3.2-2.1z" />
+    </svg>
+    <span class="fab-label">{{ i18n.t('ai_open') }}</span>
+  </button>
 </template>
 
 <style scoped>

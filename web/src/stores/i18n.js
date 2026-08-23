@@ -154,6 +154,12 @@ export const MESSAGES = {
     sort_id: '按题号排序',
     sort_recent: '最近练习优先',
     llm_key_saved_hint: 'Key 已保存在本机；留空表示不修改',
+    debug_title: '调试模式',
+    debug_hint: '收集前端报错日志，点「复制日志」发给开发者即可定位问题',
+    debug_copy: '复制日志',
+    debug_copied: '已复制！',
+    debug_clear: '清空',
+    debug_off: '关闭调试',
   },
   en: {
     nav_problems: 'Problems',
@@ -311,6 +317,12 @@ export const MESSAGES = {
     sort_id: 'By problem number',
     sort_recent: 'Recent practice first',
     llm_key_saved_hint: 'Key is saved locally; leave empty to keep it',
+    debug_title: 'Debug mode',
+    debug_hint: 'Collects frontend errors into a log you can copy and share',
+    debug_copy: 'Copy logs',
+    debug_copied: 'Copied!',
+    debug_clear: 'Clear',
+    debug_off: 'Turn off',
   },
 }
 

@@ -7,6 +7,7 @@ import ThemeSwitch from '../components/ThemeSwitch.vue'
 import { useRouter } from 'vue-router'
 
 import { api } from '../api'
+import { debugEnabled, setDebugEnabled } from '../debug'
 import { useI18nStore } from '../stores/i18n'
 import { useStatusStore } from '../stores/status'
 
@@ -91,6 +92,18 @@ async function eraseAllData() {
         <span class="field-label">{{ i18n.t('theme_system') }}</span>
         <ThemeSwitch />
       </div>
+      <div class="row">
+        <label class="use-debug">
+          <input
+            type="checkbox"
+            :checked="debugEnabled"
+            data-testid="debug-toggle"
+            @change="setDebugEnabled($event.target.checked)"
+          />
+          <span>{{ i18n.t('debug_title') }}</span>
+        </label>
+        <span class="hint-text">{{ i18n.t('debug_hint') }}</span>
+      </div>
     </div>
 
     <div class="card">
@@ -168,6 +181,13 @@ async function eraseAllData() {
 
 .btn-sm {
   padding: var(--space-1) var(--space-4);
+}
+
+.use-debug {
+  align-items: center;
+  display: inline-flex;
+  font-size: var(--font-size-body);
+  gap: var(--space-2);
 }
 
 .hint-text {

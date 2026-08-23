@@ -792,10 +792,20 @@ def spa_fallback(full_path: str):
         requested = (dist_root / full_path.lstrip("/")).resolve() if full_path else None
         if requested is not None and requested.is_file():
             if str(requested).startswith(str(dist_root)):
-                return FileResponse(requested)
+                immutable = "/assets/" in full_path
+                return FileResponse(
+                    requested,
+                    headers={
+                        "Cache-Control": (
+                            "public, max-age=31536000, immutable"
+                            if immutable
+                            else "no-cache"
+                        )
+                    },
+                )
         index = dist_root / "index.html"
         if index.is_file():
-            return FileResponse(index)
+            return FileResponse(index, headers={"Cache-Control": "no-cache"})
 
     if not full_path:
         return JSONResponse(

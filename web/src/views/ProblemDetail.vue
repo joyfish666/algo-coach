@@ -33,6 +33,7 @@ const languages = [
 ]
 const switchingLang = ref(false)
 const statementHtml = ref('')
+const renderedStatement = computed(() => statementHtml.value)
 
 const useLocalCases = ref(false)
 const casesOpen = ref(true)
@@ -46,6 +47,8 @@ const verdict = ref(null)
 
 const restoreCandidate = ref(null)
 const showRestoreBar = ref(false)
+
+let autosaveTimer = null
 
 const leftPaneRef = ref(null)
 const rightColRef = ref(null)
@@ -92,19 +95,17 @@ function onMouseUp() {
   document.body.style.cursor = ''
   document.body.style.userSelect = ''
   persistSplit()
-  window.removeEventListener('mousemove', onMouseMove)
-  window.removeEventListener('mouseup', onMouseUp)
+  document.removeEventListener('mousemove', onMouseMove)
+  document.removeEventListener('mouseup', onMouseUp)
 }
 
-function startDrag(axis) {
-  return (event) => {
-    event.preventDefault()
-    dragContext = { axis }
-    document.body.style.cursor = axis === 'x' ? 'col-resize' : 'row-resize'
-    document.body.style.userSelect = 'none'
-    window.addEventListener('mousemove', onMouseMove)
-    window.addEventListener('mouseup', onMouseUp)
-  }
+function startDrag(axis, event) {
+  event.preventDefault()
+  dragContext = { axis }
+  document.body.style.cursor = axis === 'x' ? 'col-resize' : 'row-resize'
+  document.body.style.userSelect = 'none'
+  document.addEventListener('mousemove', onMouseMove)
+  document.addEventListener('mouseup', onMouseUp)
 }
 
 onBeforeUnmount(() => {
@@ -358,7 +359,7 @@ onBeforeUnmount(() => {
         <div
           class="divider divider-v"
           data-testid="divider-main"
-          @mousedown="startDrag('x')"
+          @mousedown="startDrag('x', $event)"
         ></div>
 
         <section ref="rightColRef" class="pane right-col">
@@ -412,7 +413,7 @@ onBeforeUnmount(() => {
           <div
             class="divider divider-h"
             data-testid="divider-editor"
-            @mousedown="startDrag('y')"
+            @mousedown="startDrag('y', $event)"
           ></div>
 
           <div class="cases-zone">
