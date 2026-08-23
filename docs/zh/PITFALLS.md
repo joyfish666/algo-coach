@@ -9,6 +9,7 @@
 - **UA 风控**：使用真实浏览器 UA。
 - **每日一题时区**：以 00:00 UTC+8 为界。
 - **自定义用例输入序列化格式**：testcases.txt 与远程 interpret 接口的输入格式转换需注意（实现时验证并在此记录）。
+- **GraphQL 字段名待真网回填**：sites/cn.py 的查询文档与字段名（如 `titleCn`/`nameTranslated`/`categoryTitle`/`todayRecord`）基于公开 schema 组织，阶段 2 题库同步真网 integration 时逐一验证，差异回填本条目。
 
 ## Cookie 失效识别（三形态）
 

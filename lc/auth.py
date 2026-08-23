@@ -1,15 +1,180 @@
-"""LeetCode.cn session management.
+"""LeetCode.cn session management and cookie invalidation detection.
 
-Responsibilities (implemented in later milestones):
-- requests.Session construction with browser UA / Referer / csrfToken injection
+Responsibilities:
+- requests.Session construction from a pasted browser cookie string, with
+  browser UA / Referer injection and csrfToken extraction
 - cookie invalidation detection across three observed shapes: 403 status,
-  302 redirect to the login page, and 200 + errors payload (cn-site GraphQL
+  redirect to the login page, and 200 + errors payload (cn-site GraphQL
   sessions often expire this way; checking status codes alone misses it)
-- csrfToken extraction
-- in-process singleton lifecycle: after a successful cookie update the session
-  must be rebuilt immediately, otherwise stale cookies cause an
-  "expired right after update" loop until restart
+- shared session/client lifecycle: process-wide singletons guarded by a lock;
+  after a cookie update the session must be rebuilt immediately via
+  rebuild(), otherwise stale cookies cause an "expired right after update"
+  loop until restart
 """
 
-APP_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"
+from __future__ import annotations
+
+import threading
+from urllib.parse import urlparse
+
+import requests
+
+from lc.exceptions import AuthError
+from lc.httpclient import HttpClient
+from lc.i18n import t
+
 LEETCODE_CN_BASE = "https://leetcode.cn"
+GRAPHQL_ENDPOINT = LEETCODE_CN_BASE + "/graphql/"
+LOGIN_MARKER = "/accounts/login"
+
+BROWSER_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+)
+
+DEFAULT_HEADERS = {
+    "User-Agent": BROWSER_UA,
+    "Referer": LEETCODE_CN_BASE,
+    "Accept": "application/json",
+}
+
+AUTH_ERROR_MARKERS = (
+    "not logged in",
+    "not login",
+    "unauthenticated",
+    "authentication",
+    "login required",
+    "anonymous user",
+    "user is anonymous",
+    "not authenticated",
+    "未登录",
+    "登录",
+    "认证",
+)
+
+
+def parse_cookie_string(cookie_string: str) -> dict:
+    jar = {}
+    for pair in (cookie_string or "").split(";"):
+        pair = pair.strip()
+        if not pair:
+            continue
+        name, sep, value = pair.partition("=")
+        if sep and name.strip():
+            jar[name.strip()] = value.strip()
+    return jar
+
+
+def extract_csrf_token(cookie_string: str) -> str:
+    return parse_cookie_string(cookie_string).get("csrftoken", "")
+
+
+def build_session(cookie_string: str = "") -> requests.Session:
+    session = requests.Session()
+    session.headers.update(DEFAULT_HEADERS)
+    token = extract_csrf_token(cookie_string)
+    if token:
+        session.headers["X-CSRFToken"] = token
+    for name, value in parse_cookie_string(cookie_string).items():
+        session.cookies.set(name, value)
+    return session
+
+
+def is_login_redirect(response) -> bool:
+    for item in getattr(response, "history", None) or []:
+        location = str(getattr(item, "headers", {}).get("Location", ""))
+        if item.status_code in (301, 302, 303, 307, 308) and LOGIN_MARKER in location.lower():
+            return True
+    final_url = str(getattr(response, "url", "") or "")
+    return LOGIN_MARKER in final_url.lower()
+
+
+def body_reports_auth_error(response) -> bool:
+    """Detect the 200 + errors payload shape of session expiration."""
+    try:
+        payload = response.json()
+    except (ValueError, AttributeError):
+        return False
+    errors = payload.get("errors") if isinstance(payload, dict) else None
+    return is_auth_error_payload(errors)
+
+
+def is_auth_error_payload(errors) -> bool:
+    if not isinstance(errors, list) or not errors:
+        return False
+    for error in errors:
+        message = ""
+        if isinstance(error, dict):
+            message = str(error.get("message", "") or error.get("code", ""))
+        else:
+            message = str(error)
+        lowered = message.lower()
+        for marker in AUTH_ERROR_MARKERS:
+            if marker in lowered or marker in message:
+                return True
+    return False
+
+
+def check_response(response, *, context: str = "") -> None:
+    """Raise AuthError when the response matches any cookie-expired shape."""
+    if getattr(response, "status_code", None) == 403:
+        raise AuthError(t("cookie_invalid"), detail={"context": context, "shape": "403"})
+    if is_login_redirect(response):
+        raise AuthError(
+            t("cookie_invalid"),
+            detail={"context": context, "shape": "login_redirect"},
+        )
+    if body_reports_auth_error(response):
+        raise AuthError(
+            t("cookie_invalid"),
+            detail={"context": context, "shape": "200_with_errors"},
+        )
+
+
+_state_lock = threading.Lock()
+_session = None
+_http_client = None
+
+
+def configure(cookie_string: str = "", request_interval: float = None, timeout: float = None):
+    """Build and register fresh session + client singletons."""
+    global _session, _http_client
+    from lc.config import DEFAULTS, load
+
+    interval = request_interval
+    if interval is None:
+        try:
+            interval = float(load().get("request_interval", DEFAULTS["request_interval"]))
+        except Exception:
+            interval = DEFAULTS["request_interval"]
+    new_session = build_session(cookie_string)
+    client_kwargs = {"default_headers": dict(DEFAULT_HEADERS), "request_interval": interval}
+    if timeout is not None:
+        client_kwargs["timeout"] = timeout
+    new_client = HttpClient(new_session, **client_kwargs)
+    with _state_lock:
+        _session = new_session
+        _http_client = new_client
+    return _http_client
+
+
+def rebuild(cookie_string: str = "", **kwargs):
+    """Discard cached session/client immediately after a credential update."""
+    return configure(cookie_string, **kwargs)
+
+
+def get_session():
+    with _state_lock:
+        return _session
+
+
+def get_http_client():
+    with _state_lock:
+        return _http_client
+
+
+def reset_state() -> None:
+    global _session, _http_client
+    with _state_lock:
+        _session = None
+        _http_client = None
