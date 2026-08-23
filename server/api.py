@@ -181,6 +181,23 @@ async def domain_error_handler(request: Request, exc: AlgoCoachError):
     )
 
 
+@app.exception_handler(Exception)
+async def unhandled_error_handler(request: Request, exc: Exception):
+    logger.exception(
+        "unhandled error on %s %s: %s", request.method, request.url.path, exc
+    )
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": {
+                "kind": type(exc).__name__,
+                "message_key": "network_error",
+                "message": f"{type(exc).__name__}: {exc}",
+            }
+        },
+    )
+
+
 # ---------------------------------------------------------------------------
 # status / setup / settings
 

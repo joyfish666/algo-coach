@@ -1,3 +1,5 @@
+import { debugEnabled, debugLog } from './debug'
+
 async function handle(response) {
   if (!response.ok) {
     let payload = null
@@ -14,9 +16,17 @@ async function handle(response) {
         new CustomEvent('algocoach:auth-expired', { detail: payload.error })
       )
     }
-    const error = new Error(
-      (payload && payload.error && payload.error.message) || `HTTP ${response.status}`
-    )
+    const message =
+      (payload && payload.error && payload.error.message) ||
+      (typeof payload?.detail === 'string' ? payload.detail : null) ||
+      `HTTP ${response.status}`
+    if (debugEnabled.value) {
+      debugLog(
+        'http',
+        `${response.status} ${response.url} -> ${JSON.stringify(payload).slice(0, 400)}`
+      )
+    }
+    const error = new Error(message)
     error.status = response.status
     error.payload = payload
     throw error

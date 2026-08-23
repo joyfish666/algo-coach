@@ -18,8 +18,6 @@ const i18n = useI18nStore()
 const md = new MarkdownIt({ html: false, linkify: false, breaks: false })
 
 const SPLIT_KEY = 'algocoach-workbench-split'
-const SPLIT_MIN = 18
-const SPLIT_MAX = 82
 
 const loading = ref(true)
 const errorText = ref('')
@@ -52,6 +50,7 @@ let autosaveTimer = null
 
 const leftPaneRef = ref(null)
 const rightColRef = ref(null)
+const dragActive = ref(false)
 
 function readSplit() {
   try {
@@ -72,36 +71,59 @@ function persistSplit() {
 }
 
 let dragContext = null
-
-function clampPct(value) {
-  return Math.min(SPLIT_MAX, Math.max(SPLIT_MIN, Math.round(value * 10) / 10))
-}
+let rafId = 0
+let pendingEvent = null
 
 function onMouseMove(event) {
-  if (!dragContext) return
+  pendingEvent = event
+  if (rafId) return
+  rafId = requestAnimationFrame(applyDrag)
+}
+
+function applyDrag() {
+  rafId = 0
+  const event = pendingEvent
+  if (!dragContext || !event) return
   if (dragContext.axis === 'x') {
     const rect = leftPaneRef.value?.getBoundingClientRect()
     if (!rect) return
-    split.value.mainPct = clampPct(((event.clientX - rect.left) / rect.width) * 100)
+    const total = rect.width / (split.value.mainPct / 100)
+    const minPct = (280 / total) * 100
+    const maxPct = 100 - (320 / total) * 100
+    split.value.mainPct = Math.min(
+      Math.max(minPct, ((event.clientX - rect.left) / rect.width) * 100),
+      maxPct
+    )
   } else {
     const rect = rightColRef.value?.getBoundingClientRect()
     if (!rect) return
-    split.value.editorPct = clampPct(((event.clientY - rect.top) / rect.height) * 100)
+    const minEditor = (220 / rect.height) * 100
+    const maxEditor = 100 - (150 / rect.height) * 100
+    split.value.editorPct = Math.min(
+      Math.max(minEditor, ((event.clientY - rect.top) / rect.height) * 100),
+      maxEditor
+    )
   }
 }
 
 function onMouseUp() {
   dragContext = null
+  dragActive.value = false
+  if (rafId) {
+    cancelAnimationFrame(rafId)
+    rafId = 0
+  }
   document.body.style.cursor = ''
   document.body.style.userSelect = ''
-  persistSplit()
   document.removeEventListener('mousemove', onMouseMove)
   document.removeEventListener('mouseup', onMouseUp)
+  persistSplit()
 }
 
 function startDrag(axis, event) {
   event.preventDefault()
   dragContext = { axis }
+  dragActive.value = true
   document.body.style.cursor = axis === 'x' ? 'col-resize' : 'row-resize'
   document.body.style.userSelect = 'none'
   document.addEventListener('mousemove', onMouseMove)
@@ -342,7 +364,7 @@ onBeforeUnmount(() => {
         </template>
       </PageHeader>
 
-      <div class="wb" data-testid="workbench">
+      <div class="wb" :class="{ 'wb-dragging': dragActive }" data-testid="workbench">
         <section ref="leftPaneRef" class="pane left-pane" :style="{ width: split.mainPct + '%' }">
           <div class="card pane-card">
             <h2>{{ i18n.t('problem_statement') }}</h2>
@@ -496,6 +518,14 @@ onBeforeUnmount(() => {
   min-height: calc(100vh - 220px);
 }
 
+.wb-dragging * {
+  pointer-events: none;
+}
+
+.wb-dragging .divider {
+  pointer-events: auto;
+}
+
 .pane {
   display: flex;
   flex-direction: column;
@@ -597,8 +627,22 @@ onBeforeUnmount(() => {
 }
 
 .editor-body {
+  display: flex;
   flex: 1;
-  min-height: 120px;
+  min-height: 0;
+}
+
+.editor-body :deep(.code-editor) {
+  flex: 1;
+  height: 100%;
+}
+
+.editor-body :deep(.cm-editor) {
+  height: 100%;
+}
+
+.editor-body :deep(.cm-scroller) {
+  overflow: auto;
 }
 
 .editor-head {

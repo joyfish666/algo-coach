@@ -83,6 +83,10 @@ export function debugClear() {
   debugEntries.value = []
 }
 
+export function debugLog(level, text) {
+  push(level, String(text).slice(0, 800))
+}
+
 if (debugEnabled.value) {
   install()
 }
