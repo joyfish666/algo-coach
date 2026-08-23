@@ -63,9 +63,6 @@ async function validateAndNext() {
   try {
     await api.validateCookie(composedCookie.value)
     cookieOk.value = true
-    setTimeout(() => {
-      if (cookieOk.value) goStep(2)
-    }, 400)
   } catch (err) {
     cookieOk.value = false
     cookieError.value =
@@ -203,11 +200,20 @@ async function finish() {
         <p v-else-if="cookieError" class="msg bad" data-testid="cookie-error">{{ cookieError }}</p>
 
         <div class="row-actions">
+          <button
+            class="btn btn-ghost"
+            type="button"
+            :disabled="!composedCookie || validating || cookieOk"
+            data-testid="cookie-validate"
+            @click="validateAndNext"
+          >
+            {{ validating ? i18n.t('validating') : i18n.t('validate') }}
+          </button>
           <span class="spacer"></span>
           <button
             class="btn btn-primary"
             type="button"
-            :disabled="!composedCookie || validating || !cookieOk"
+            :disabled="!cookieOk || validating"
             data-testid="cookie-next"
             @click="goStep(2)"
           >
