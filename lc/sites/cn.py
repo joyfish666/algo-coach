@@ -501,13 +501,19 @@ def normalize_check_payload(payload: dict, *, fallback_submission_id: str = "") 
     )
     memory = payload.get("memory")
     memory_display = payload.get("memory_display") or humanize_bytes(memory)
+    status_key = (
+        _classify_status(payload.get("status_msg"), run_success) if finished else None
+    )
+    if finished and status_key == "unknown":
+        if str(payload.get("compile_error", "") or ""):
+            status_key = "compile_error"
+        elif str(payload.get("runtime_error", "") or ""):
+            status_key = "runtime_error"
     verdict = {
         "finished": finished,
         "raw_state": state,
         "raw_status_code": status_code,
-        "status_key": _classify_status(payload.get("status_msg"), run_success)
-        if finished
-        else None,
+        "status_key": status_key,
         "status_msg": str(payload.get("status_msg", "") or ""),
         "runtime_display": runtime_display,
         "runtime_percentile": _optional_number(payload.get("runtime_percentile")),
