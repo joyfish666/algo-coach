@@ -19,6 +19,8 @@ const statusText = computed(() => {
   return props.verdict.status_msg || '—'
 })
 
+const isInternalError = computed(() => statusKey.value === 'internal_error')
+
 const hasMetrics = computed(
   () => Boolean(props.verdict.runtime_display || props.verdict.memory_display)
 )
@@ -55,7 +57,7 @@ const runtimeError = computed(() => (statusKey.value === 'runtime_error'
 
 <template>
   <div class="card result-panel" data-testid="judge-result">
-    <div class="headline" :class="`is-${statusKey}`">{{ statusText }}</div>
+    <div class="headline" :class="`is-${statusKey}`" :data-internal="isInternalError ? '1' : undefined">{{ statusText }}</div>
 
     <p v-if="statusKey === 'unknown'" class="unknown-hint">
       {{ i18n.t('verdict_unknown_hint') }}

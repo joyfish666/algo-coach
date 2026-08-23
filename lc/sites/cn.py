@@ -435,6 +435,7 @@ _STATUS_KEY_RULES = (
     ("time limit", "tle"),
     ("memory limit", "mle"),
     ("output limit", "ole"),
+    ("internal error", "internal_error"),
 )
 
 

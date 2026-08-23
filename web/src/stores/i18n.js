@@ -57,6 +57,7 @@ export const MESSAGES = {
     verdict_mle: '超出内存限制',
     verdict_ole: '输出超限',
     verdict_unknown: '结果未知',
+    verdict_internal_error: '调试服务暂不可用（站点内部错误），请稍后重试',
     verdict_unknown_hint: '判定超时但提交已进入站内历史，请在站内确认该提交结果',
     label_runtime: '用时',
     label_memory: '内存',
@@ -216,6 +217,7 @@ export const MESSAGES = {
     verdict_mle: 'Memory Limit Exceeded',
     verdict_ole: 'Output Limit Exceeded',
     verdict_unknown: 'Result Unknown',
+    verdict_internal_error: 'Debug service temporarily unavailable (site internal error) — retry shortly',
     verdict_unknown_hint:
       'Judging timed out but the submission entered your site history — verify it there',
     label_runtime: 'Runtime',
