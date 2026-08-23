@@ -180,6 +180,14 @@ def test_parse_retry_after_variants():
     assert parse_retry_after("garbage-date") is None
 
 
+def test_explicit_idempotent_kwargs_never_conflict(fake_time):
+    session = ScriptedSession([FakeResponse(200), FakeResponse(200), FakeResponse(200)])
+    client = make_client(session)
+    assert client.get("https://example.test/a", idempotent=True).status_code == 200
+    assert client.get("https://example.test/b").status_code == 200
+    assert client.post("https://example.test/c", idempotent=False, json={}).status_code == 200
+
+
 def test_backoff_capped_at_thirty_seconds():
     client = HttpClient(ScriptedSession([]))
     assert client._backoff_delay(1) == 1.0

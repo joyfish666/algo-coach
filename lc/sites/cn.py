@@ -251,7 +251,7 @@ class LeetCodeCnAdapter(SiteAdapter):
 
     def poll_submission(self, submission_id: str) -> dict:
         url = LEETCODE_CN_BASE + self.CHECK_PATH.format(sid=submission_id)
-        response = self.client.get(url, idempotent=True)
+        response = self.client.get(url)
         check_response(response, context="check")
         try:
             payload = response.json()

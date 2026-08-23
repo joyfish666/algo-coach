@@ -113,10 +113,12 @@ class HttpClient:
         self.session = session
 
     def get(self, url, **kwargs):
-        return self.request("GET", url, idempotent=True, **kwargs)
+        kwargs.setdefault("idempotent", True)
+        return self.request("GET", url, **kwargs)
 
     def post(self, url, *, idempotent=False, **kwargs):
-        return self.request("POST", url, idempotent=idempotent, **kwargs)
+        kwargs["idempotent"] = idempotent
+        return self.request("POST", url, **kwargs)
 
     def _backoff_delay(self, attempt: int) -> float:
         delay = float(2 ** max(0, attempt - 1))
@@ -127,10 +129,10 @@ class HttpClient:
         method: str,
         url: str,
         *,
-        idempotent: bool = None,
         headers: dict = None,
         **kwargs,
     ):
+        idempotent = kwargs.pop("idempotent", None)
         if idempotent is None:
             idempotent = method.upper() == "GET"
         merged_headers = {**self.default_headers, **(headers or {})}
