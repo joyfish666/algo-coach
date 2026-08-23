@@ -23,8 +23,8 @@ const cookieOk = ref(false)
 const cookieError = ref('')
 
 const llmKey = ref('')
-const llmBaseUrl = ref('')
-const llmModel = ref('')
+const llmBaseUrl = ref('https://api.deepseek.com')
+const llmModel = ref('deepseek-v4-flash')
 
 const codingLang = ref('cpp')
 const finishing = ref(false)
@@ -229,11 +229,11 @@ async function finish() {
         </div>
         <div class="field">
           <span class="field-label">{{ i18n.t('llm_base_url') }}</span>
-          <input v-model="llmBaseUrl" class="input wide" placeholder="https://api.openai.com/v1" />
+          <input v-model="llmBaseUrl" class="input wide" placeholder="https://api.deepseek.com" />
         </div>
         <div class="field">
           <span class="field-label">{{ i18n.t('llm_model') }}</span>
-          <input v-model="llmModel" class="input wide" placeholder="gpt-4o-mini" />
+          <input v-model="llmModel" class="input wide" placeholder="deepseek-v4-flash" />
         </div>
         <p class="hint-text">{{ i18n.t('llm_skip_hint') }}</p>
 

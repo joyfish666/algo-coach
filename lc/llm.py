@@ -29,12 +29,12 @@ class LLMClient:
         *,
         base_url: str,
         api_key: str,
-        model: str = "gpt-4o-mini",
+        model: str = "deepseek-v4-flash",
         timeout: float = 120.0,
     ):
         self.endpoint = normalize_base_url(base_url)
         self.api_key = api_key
-        self.model = model or "gpt-4o-mini"
+        self.model = model or "deepseek-v4-flash"
         self.timeout = float(timeout)
 
     def chat(self, messages: list) -> str:

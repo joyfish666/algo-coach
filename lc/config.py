@@ -25,6 +25,7 @@ APP_DIR_NAME = ".algocoach"
 CONFIG_FILE_NAME = "config.toml"
 PROBLEMS_CACHE_NAME = "problems.json"
 ARCHIVE_FILE_NAME = "submissions.jsonl"
+INSTANCE_LOCK_NAME = "instance.lock"
 
 DEFAULTS = {
     "schema_version": SCHEMA_VERSION,

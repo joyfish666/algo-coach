@@ -93,4 +93,5 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ limit }),
     }),
+  clearLocalData: () => request('/api/local-data', { method: 'DELETE' }),
 }

@@ -7,8 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Live-network schema corrections for leetcode.cn (verified with a real session on 2026-08-23):
+  the problem-list query now calls `problemsetQuestionList` directly and reads
+  QuestionLightNode fields (`paidOnly`, `frontendQuestionId`, `nameTranslated` tags) instead of
+  the guessed com-style shape that crashed sync; question detail drops the nonexistent
+  `titleCn` in favor of `translatedTitle`; site submission imports use `submissionList`
+  (`recentSubmissionList` does not exist) deriving slugs from submission URLs.
+- The server no longer fails judge/daily/sync calls with "cookie missing" after a fresh start:
+  the auth singleton now lazily initializes from config on first adapter use.
+- The setup wizard's validate button is wired up (it existed only as an unbound function since
+  the skeleton), with explicit Validate/Next gating covered by component tests.
+
 ### Added
 
+- AI defaults switched to DeepSeek: base URL https://api.deepseek.com and model
+  deepseek-v4-flash are prefilled in the wizard and used as fallbacks server-side.
+- Data transparency: /api/status exposes the data directory; a new "Data & privacy" settings card
+  shows it and offers a one-click erase of everything under ~/.algocoach (cache, archive,
+  workspace, config) returning the app to the unconfigured state; usage FAQ documents location,
+  deletion and the session-rotation pitfall behind seemingly-valid cookies expiring.
 - Packaging polish and release readiness (stage 7): the built frontend is now served directly by
   `coach` through a dist resolution chain (ALGOCOACH_DIST override → repository web/dist →
   packaged server/webdist copy shipped via package-data) with an SPA catch-all fallback to

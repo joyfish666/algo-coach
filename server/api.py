@@ -95,7 +95,11 @@ def get_archive() -> Archive:
 def create_adapter() -> LeetCodeCnAdapter:
     client = auth.get_http_client()
     if client is None:
-        raise HTTPException(status_code=400, detail=t("cookie_missing"))
+        config = effective_config()
+        cookie = str(config.get("cookie", "") or "")
+        if not cookie:
+            raise HTTPException(status_code=400, detail=t("cookie_missing"))
+        client = auth.configure(cookie, request_interval=config["request_interval"])
     return LeetCodeCnAdapter(client=client)
 
 
@@ -184,11 +188,14 @@ async def domain_error_handler(request: Request, exc: AlgoCoachError):
 @app.get("/api/status")
 def get_status():
     config = effective_config()
+    from lc.config import app_dir
+
     return {
         "app": "algocoach",
         "version": lc.__version__,
         "site": "leetcode.cn",
         "configured": bool(config.get("cookie")),
+        "data_dir": str(app_dir()),
         "sync": _sync_engine.progress(),
     }
 
@@ -539,7 +546,7 @@ def _build_llm() -> LLMClient:
     return LLMClient(
         base_url=base_url,
         api_key=api_key,
-        model=str(config.get("llm_model", "") or "gpt-4o-mini"),
+        model=str(config.get("llm_model", "") or "deepseek-v4-flash"),
         timeout=float(config.get("llm_timeout", 120.0)),
     )
 
@@ -719,6 +726,45 @@ def import_site(payload: ImportSitePayload):
     result = {"imported": imported, "skipped": skipped}
     logger.info("site import: %s", result)
     return result
+
+
+@app.delete("/api/local-data")
+def clear_local_data():
+    """Erase everything under the data directory except the live lock file.
+
+    Removes problem cache, submission archive, workspace files and config
+    (cookie included); auth singletons are reset so the app returns to the
+    unconfigured state immediately.
+    """
+    if _sync_engine.progress()["running"]:
+        raise HTTPException(status_code=409, detail=t("sync_in_progress"))
+
+    from lc.config import INSTANCE_LOCK_NAME, app_dir
+
+    root = app_dir()
+    cleared = []
+    if root.exists():
+        keep = {INSTANCE_LOCK_NAME}
+        for entry in sorted(root.iterdir()):
+            if entry.name in keep:
+                continue
+            try:
+                if entry.is_dir():
+                    import shutil
+
+                    shutil.rmtree(entry)
+                else:
+                    entry.unlink()
+                cleared.append(entry.name)
+            except OSError as exc:
+                logger.warning("could not remove %s: %s", entry, exc)
+
+    auth.reset_state()
+    global _archive
+    with _archive_lock:
+        _archive = None
+    logger.info("local data cleared: %s", cleared)
+    return {"cleared": cleared, "data_dir": str(root)}
 
 
 # ---------------------------------------------------------------------------

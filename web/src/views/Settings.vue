@@ -4,14 +4,23 @@ import { onMounted, ref } from 'vue'
 import LanguageSwitch from '../components/LanguageSwitch.vue'
 import PageHeader from '../components/PageHeader.vue'
 import ThemeSwitch from '../components/ThemeSwitch.vue'
+import { useRouter } from 'vue-router'
+
+import { api } from '../api'
 import { useI18nStore } from '../stores/i18n'
+import { useStatusStore } from '../stores/status'
 
 const i18n = useI18nStore()
+const status = useStatusStore()
+const router = useRouter()
 
 const codingLang = ref('cpp')
 const cookieConfigured = ref(null)
 const saving = ref(false)
 const savedAt = ref('')
+
+const clearingData = ref(false)
+const clearMessage = ref('')
 
 const languages = [
   { value: 'cpp', label: 'C++' },
@@ -44,6 +53,26 @@ async function saveDefaultLanguage() {
     }
   } finally {
     saving.value = false
+  }
+}
+
+async function eraseAllData() {
+  if (clearingData.value) return
+  if (!window.confirm(i18n.t('clear_confirm'))) return
+  clearingData.value = true
+  clearMessage.value = ''
+  try {
+    await api.clearLocalData()
+    clearMessage.value = i18n.t('cleared_ok')
+    await status.refresh()
+    setTimeout(() => router.push('/setup'), 900)
+  } catch (err) {
+    clearMessage.value =
+      (err.payload && err.payload.detail) ||
+      (err.payload && err.payload.error && err.payload.error.message) ||
+      err.message
+  } finally {
+    clearingData.value = false
   }
 }
 </script>
@@ -98,6 +127,24 @@ async function saveDefaultLanguage() {
         </RouterLink>
       </div>
     </div>
+
+    <div class="card">
+      <h2>{{ i18n.t('data_section') }}</h2>
+      <p class="hint-text">{{ i18n.t('data_path_hint') }}</p>
+      <code class="data-path" data-testid="data-dir">{{ status.dataDir || '—' }}</code>
+      <div class="row">
+        <button
+          class="btn btn-ghost danger"
+          type="button"
+          :disabled="clearingData"
+          data-testid="clear-data-btn"
+          @click="eraseAllData"
+        >
+          {{ clearingData ? i18n.t('clearing') : i18n.t('clear_all') }}
+        </button>
+        <span v-if="clearMessage" class="saved-hint" data-testid="clear-message">{{ clearMessage }}</span>
+      </div>
+    </div>
   </section>
 </template>
 
@@ -121,5 +168,25 @@ async function saveDefaultLanguage() {
 
 .btn-sm {
   padding: var(--space-1) var(--space-4);
+}
+
+.hint-text {
+  color: var(--gray-neutral);
+  font-size: var(--font-size-caption);
+}
+
+.data-path {
+  background: var(--bg-secondary);
+  border-radius: var(--space-1);
+  display: inline-block;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: var(--font-size-caption);
+  margin-bottom: var(--space-4);
+  padding: var(--space-1) var(--space-2);
+  word-break: break-all;
+}
+
+.danger:hover:not(:disabled) {
+  border-color: var(--text-primary);
 }
 </style>

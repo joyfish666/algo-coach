@@ -175,6 +175,22 @@ def test_put_solution_endpoint_writes_file(client, monkeypatch):
     assert unsupported.status_code == 422
 
 
+def test_create_adapter_lazy_initializes_from_config(client, monkeypatch):
+    import lc.config as config
+
+    data = dict(config.DEFAULTS)
+    data["cookie"] = "csrftoken=tok9; LEETCODE_SESSION=sess9"
+    data["request_interval"] = 3.0
+    config.save(data)
+    auth.reset_state()
+    api_module._archive = None
+
+    adapter = api_module.create_adapter()
+    session = auth.get_session()
+    assert session.cookies.get("csrftoken") == "tok9"
+    assert adapter.client.limiter.interval == 3.0
+
+
 def test_judge_requires_existing_problem(client, monkeypatch):
     monkeypatch.setattr(api_module, "create_adapter", lambda: FakeJudgeAdapter())
     response = client.post(

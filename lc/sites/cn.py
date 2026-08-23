@@ -9,6 +9,8 @@ problems-sync milestone; findings must be recorded back into PITFALLS.md.
 
 from __future__ import annotations
 
+import re
+
 from lc.auth import (
     GRAPHQL_ENDPOINT,
     LEETCODE_CN_BASE,
@@ -36,22 +38,17 @@ query userStatusInfo {
 
 PROBLEM_LIST_QUERY = """
 query problemsetQuestionList($categorySlug: String!, $limit: Int!, $skip: Int!, $filters: QuestionListFilterInput) {
-  problemsetQuestionList: questionList(
-    categorySlug: $categorySlug
-    limit: $limit
-    skip: $skip
-    filters: $filters
-  ) {
-    total: totalNum
-    questions: data {
-      frontendQuestionId: questionFrontendId
-      titleSlug
+  problemsetQuestionList(categorySlug: $categorySlug, limit: $limit, skip: $skip, filters: $filters) {
+    hasMore
+    total
+    questions {
+      acRate
+      difficulty
+      frontendQuestionId
       title
       titleCn
-      translatedTitle
-      difficulty
-      isPaidOnly
-      categoryTitle
+      titleSlug
+      paidOnly
       topicTags {
         slug
         name
@@ -69,7 +66,6 @@ query questionDetailBySlug($titleSlug: String!) {
     questionFrontendId
     titleSlug
     title
-    titleCn
     translatedTitle
     content
     translatedContent
@@ -77,6 +73,7 @@ query questionDetailBySlug($titleSlug: String!) {
     isPaidOnly
     hints
     sampleTestCase
+    exampleTestcases
     codeSnippets {
       lang
       langSlug
@@ -85,7 +82,7 @@ query questionDetailBySlug($titleSlug: String!) {
     topicTags {
       slug
       name
-      nameTranslated
+      translatedName
     }
   }
 }
@@ -100,15 +97,19 @@ mutation interpretSolutionRun($id: ID!, $code: String!, $lang: String!, $input: 
 """
 
 RECENT_SUBMISSIONS_QUERY = """
-query recentSubmissionFeed($limit: Int!) {
-  recentSubmissionList(limit: $limit) {
-    id
-    title
-    titleSlug
-    translatedTitle
-    statusDisplay
-    lang
-    timestamp
+query recentSubmissionFeed($limit: Int!, $offset: Int!) {
+  submissionList(limit: $limit, offset: $offset) {
+    hasNext
+    lastKey
+    submissions {
+      id
+      statusDisplay
+      lang
+      runtime
+      timestamp
+      url
+      title
+    }
   }
 }
 """
@@ -118,18 +119,13 @@ query todayQuestionRecord {
   todayRecord {
     date
     question {
+      questionId
       questionFrontendId
       titleSlug
       title
-      titleCn
       translatedTitle
       difficulty
       isPaidOnly
-      topicTags {
-        slug
-        name
-        nameTranslated
-      }
     }
   }
 }
@@ -303,11 +299,14 @@ class LeetCodeCnAdapter(SiteAdapter):
         """Site-side recent submissions (capability boundary: about 20)."""
         capped = max(1, min(int(limit), 20))
         data = self._graphql(
-            "recentSubmissionFeed", RECENT_SUBMISSIONS_QUERY, {"limit": capped}
+            "recentSubmissionFeed",
+            RECENT_SUBMISSIONS_QUERY,
+            {"limit": capped, "offset": 0},
         )
-        feed = data.get("recentSubmissionList") or []
+        feed = data.get("submissionList") or {}
+        rows = feed.get("submissions") or []
         normalized = []
-        for raw in feed:
+        for raw in rows:
             item = normalize_site_submission(raw)
             if item is not None:
                 normalized.append(item)
@@ -321,7 +320,11 @@ def normalize_tag(raw) -> dict:
     return {
         "slug": str(raw.get("slug", "") or ""),
         "name_en": name_en,
-        "name_zh": str(raw.get("nameTranslated", "") or raw.get("translatedName", "") or name_en),
+        "name_zh": str(
+            raw.get("nameTranslated", "")
+            or raw.get("translatedName", "")
+            or name_en
+        ),
     }
 
 
@@ -339,16 +342,21 @@ def normalize_problem_row(raw) -> dict:
     title_cn = raw.get("titleCn") or raw.get("translatedTitle") or raw.get("title") or ""
     difficulty = str(raw.get("difficulty", "") or "").lower()
     tags = [normalize_tag(tag) for tag in (raw.get("topicTags") or [])]
-    return {
+    paid_only = bool(raw.get("paidOnly", raw.get("isPaidOnly", False)))
+    ac_rate = raw.get("acRate")
+    row = {
         "slug": str(slug),
         "frontend_id": str(frontend_id),
         "title_en": str(raw.get("title", "") or ""),
         "title_cn": str(title_cn),
         "difficulty": difficulty,
-        "paid_only": bool(raw.get("isPaidOnly", False)),
+        "paid_only": paid_only,
         "category": str(raw.get("categoryTitle", "") or raw.get("category", "") or ""),
         "tags": tags,
     }
+    if isinstance(ac_rate, (int, float)):
+        row["ac_rate"] = round(float(ac_rate), 2)
+    return row
 
 
 def normalize_question_detail(raw) -> dict:
@@ -390,11 +398,13 @@ def normalize_question_detail(raw) -> dict:
 
 
 def normalize_site_submission(raw: dict) -> dict | None:
-    """Normalize a recentSubmissionList item; None skips the row."""
+    """Normalize a submissionList row; slug is derived from the url path."""
     if not isinstance(raw, dict):
         return None
     submission_id = raw.get("id") or raw.get("submission_id")
-    slug = raw.get("titleSlug") or raw.get("title_slug")
+    url = str(raw.get("url", "") or "")
+    match = re.search(r"/problems/([a-z0-9-]+)/", url)
+    slug = match.group(1) if match else raw.get("titleSlug")
     if not submission_id or not slug:
         return None
     return {

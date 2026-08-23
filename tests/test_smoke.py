@@ -19,7 +19,9 @@ def test_exception_hierarchy():
     assert issubclass(JudgeError, Exception)
 
 
-def test_status_endpoint():
+def test_status_endpoint(tmp_path, monkeypatch):
+    monkeypatch.setenv("ALGOCOACH_HOME", str(tmp_path / "home"))
+
     from fastapi.testclient import TestClient
 
     from server.api import app

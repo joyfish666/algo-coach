@@ -142,6 +142,13 @@ export const MESSAGES = {
     ai_open: 'AI',
     ai_close: '收起 AI 面板',
     ai_context_hint: '已自动附带当前题目与最近判定上下文',
+    data_section: '数据与隐私',
+    data_path_hint: '所有数据仅保存在你电脑的这个目录里：',
+    clear_all: '清除全部本地数据',
+    clearing: '正在清除…',
+    clear_confirm:
+      '将删除题库缓存、练习归档、工作区文件以及配置（含 Cookie）。此操作不可恢复，确定继续？',
+    cleared_ok: '已清除，请重新配置。',
   },
   en: {
     nav_problems: 'Problems',
@@ -287,6 +294,13 @@ export const MESSAGES = {
     ai_open: 'AI',
     ai_close: 'Collapse AI panel',
     ai_context_hint: 'Current problem & latest verdict attached automatically',
+    data_section: 'Data & privacy',
+    data_path_hint: 'All data lives only in this folder on your machine:',
+    clear_all: 'Erase all local data',
+    clearing: 'Erasing…',
+    clear_confirm:
+      'This deletes the problem cache, practice archive, workspace files and your config (cookie included). It cannot be undone. Continue?',
+    cleared_ok: 'Erased. Please set up again.',
   },
 }
 

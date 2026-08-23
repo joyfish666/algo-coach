@@ -9,9 +9,14 @@
 - **UA 风控**：使用真实浏览器 UA。
 - **每日一题时区**：以 00:00 UTC+8 为界。
 - **自定义用例输入序列化格式**：testcases.txt 与远程 interpret 接口的输入格式转换需注意（实现时验证并在此记录）。
-- **GraphQL 字段名待真网回填**：sites/cn.py 的查询文档与字段名（如 `titleCn`/`nameTranslated`/`categoryTitle`/`todayRecord`）基于公开 schema 组织。阶段 2 冒烟已验证 `/graphql` 端点连通与 Cookie 失效识别链路；字段级验证在题库全量同步真网 integration 时逐一确认，差异回填本条目。
-- **判定接口形态待真网验证**：submit 走 REST（POST /problems/{slug}/submit/ → 轮询 /submissions/detail/{id}/check/），run 走 GraphQL interpretSolution mutation 后复用同一 check 端点轮询；结果分类优先依据 status_msg 文本而非 status_code 数字（两站数字语义有漂移风险）。真网实测 two-sum 与剑指 Offer 后回填差异。
-- **recentSubmissionList 字段待回填**：导入用查询请求 `id/titleSlug/translatedTitle/statusDisplay/lang/timestamp`；若真网返回字段不同（如无 titleSlug 只有 url），在 sites/cn.py 单点修正解析并回填本条。
+- **GraphQL 字段名【已真网回填 2026-08-23】**：cn 站实测确认——
+  - 题库列表：顶层 `problemsetQuestionList(categorySlug, limit, skip, filters)` 直接调用（**不存在**底层 `questionList` 字段）；行节点是 `QuestionLightNode`，字段为 `acRate / difficulty / title / titleCn / titleSlug / paidOnly / frontendQuestionId / topicTags { slug name nameTranslated }`（CommonTagNode）；**没有** `isPaidOnly`、`categoryTitle`、`translatedTitle`、`questionFrontendId`
+  - 题目详情：`question(titleSlug:)` 节点用 `translatedTitle`（**无 `titleCn`**），标签节点是 `TopicTagNode` 用 `translatedName`，含 `exampleTestcases` 与内部 `questionId`（判定接口必需）
+  - 每日一题：`todayRecord { date question { … } }`，question 无 topicTags
+  - 站内提交列表：**不存在 `recentSubmissionList`**；用 `submissionList(limit, offset) { hasNext lastKey submissions { id statusDisplay lang runtime timestamp url title } }`（节点 `SubmissionDumpNode` 无 titleSlug，slug 从 url `/problems/<slug>/` 正则提取）；未登录返回**空列表而非报错**
+  - REST `/api/submissions/` 存在但需有效会话（401 JSON）
+  - 判定 submit/interpret 形态仍未实测（需有效会话），维持「status_msg 文本优先分类」策略，实测后回填
+- **会话轮换陷阱**：重新登录 leetcode.cn 会使旧的 LEETCODE_SESSION 在服务端立即失效——本地 Cookie 文件再完好也无法通过校验；用户报「明明复制对了却提示失效」时优先怀疑此因，请以最新一次登录后复制的为准。
 - **Windows 上 os.kill(pid, 0) 会杀进程**：CPython 在 Windows 把非 CTRL 信号一律走 TerminateProcess，信号 0 也不例外。进程存活探测必须用 ctypes `OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION)` + `GetExitCodeProcess == STILL_ACTIVE(259)`（见 cli.py `_pid_alive`）。
 - **打包后 dist 定位链**：`ALGOCOACH_DIST` → 向上搜索仓库 `web/dist`（可编辑安装/源码态）→ 安装目录内 `server/webdist`（wheel 态，发布前需 npm build 后拷贝，package-data 打包）。三处都未命中则 API-only 模式，根路径返回 JSON 提示。
 - **console_script 监听者是 python.exe**：Windows 下 pip 生成的 coach.exe 只是启动器，真正监听端口的进程名是 python——按端口清理进程时勿只匹配 coach.exe。

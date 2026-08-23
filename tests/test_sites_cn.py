@@ -71,7 +71,7 @@ def test_fetch_problem_list_page_normalizes_rows():
                         "title": "Two Sum",
                         "titleCn": "两数之和",
                         "difficulty": "Easy",
-                        "isPaidOnly": False,
+                        "paidOnly": False,
                         "topicTags": [
                             {"slug": "array", "name": "Array", "nameTranslated": "数组"},
                             {"slug": "hash-table", "name": "Hash Table", "nameTranslated": "哈希表"},
@@ -83,7 +83,7 @@ def test_fetch_problem_list_page_normalizes_rows():
                         "title": "Shu Zu Zhong Zhong Fu De Shu Zi LCOF",
                         "translatedTitle": "数组中重复的数字",
                         "difficulty": "Medium",
-                        "isPaidOnly": True,
+                        "paidOnly": True,
                     },
                 ],
             }
@@ -218,3 +218,24 @@ def test_normalize_question_detail_direct():
     detail = normalize_question_detail(raw)
     assert detail["frontend_id"] == "LCP 07"
     assert detail["paid_only"] is False
+
+
+def test_normalize_site_submission_extracts_slug_from_url():
+    from lc.sites.cn import normalize_site_submission
+
+    row = normalize_site_submission({
+        "id": "777",
+        "statusDisplay": "Accepted",
+        "lang": "cpp",
+        "runtime": "52 ms",
+        "timestamp": "1755900000",
+        "url": "/problems/two-sum/submissions/",
+        "title": "Two Sum",
+    })
+    assert row["slug"] == "two-sum"
+    assert row["submission_id"] == "777"
+    assert row["status"] == "Accepted"
+
+    assert normalize_site_submission({"id": "1"}) is None
+    assert normalize_site_submission({"id": "1", "url": "/contests/weekly/"}) is None
+    assert normalize_site_submission({"url": "/problems/x/"}) is None

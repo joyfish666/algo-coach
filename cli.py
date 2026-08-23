@@ -31,9 +31,9 @@ from rich.console import Console
 from rich.panel import Panel
 
 import lc
-from lc.config import app_dir
+from lc.config import INSTANCE_LOCK_NAME, app_dir
 
-LOCK_FILE_NAME = "instance.lock"
+LOCK_FILE_NAME = INSTANCE_LOCK_NAME
 STILL_ACTIVE = 259
 
 
