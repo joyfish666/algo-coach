@@ -136,6 +136,22 @@ async def domain_error_handler(request: Request, exc: AlgoCoachError):
 # status / setup / settings
 
 
+@app.get("/")
+def index():
+    return {
+        "app": f"AlgoCoach v{lc.__version__}",
+        "hint": "browser is opening; useful endpoints below",
+        "endpoints": [
+            "/api/status",
+            "/api/settings",
+            "/api/problems",
+            "/api/problems/sync/progress",
+            "/api/daily",
+            "/api/problem/two-sum",
+        ],
+    }
+
+
 @app.get("/api/status")
 def get_status():
     config = effective_config()
