@@ -56,6 +56,9 @@ _MIGRATIONS = {}
 
 
 def app_dir() -> Path:
+    override = os.environ.get("ALGOCOACH_HOME")
+    if override:
+        return Path(override).expanduser()
     return Path.home() / APP_DIR_NAME
 
 

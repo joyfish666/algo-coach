@@ -13,6 +13,7 @@ from lc.auth import GRAPHQL_ENDPOINT, check_response, get_http_client
 from lc.exceptions import (
     AuthError,
     NetworkError,
+    PremiumProblemError,
     ProblemNotFoundError,
 )
 from lc.i18n import t
@@ -243,6 +244,10 @@ def normalize_question_detail(raw) -> dict:
     detail = normalize_problem_row(raw)
     statement = raw.get("translatedContent") or raw.get("content")
     if not statement:
+        if detail.get("paid_only"):
+            raise PremiumProblemError(
+                t("premium_problem"), detail={"slug": detail["slug"]}
+            )
         raise NetworkError(
             f"question '{detail['slug']}' returned no statement content",
             detail={"slug": detail["slug"]},

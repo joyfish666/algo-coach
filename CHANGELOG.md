@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Problem data layer and REST surface (stage 2): a thread-safe sync engine paging the full
+  problem list into problems.json with atomic writes, in-process resume after a failed page,
+  slug/frontendQuestionId duplicate skipping without aborting, and unsupported-category marking;
+  workspace materialization per problem directory (zero-padded numeric or slug naming) writing a
+  self-authored HTML-to-markdown statement conversion, structured sample cases, prefilled custom
+  testcases and on-demand code templates, with user-edited files backed up to .bak on refresh via
+  programmatic-write hash bookkeeping; server endpoints for status, cookie validation, masked
+  settings read/update with immediate session rebuild, problem list, sync start/progress with
+  409 conflict handling, daily question, problem open/refresh with offline reads and cache
+  self-healing write-back, template fetching and testcase saving; local Origin/Host guard
+  middleware with method-tiered enforcement and domain-exception translation into structured
+  error JSON.
 - Core library layer (stage 1): configuration stored as `~/.algocoach/config.toml` with schema
   versioning, atomic writes, restrictive permissions on POSIX and the CLI > environment > file
   priority chain; a unified HTTP client enforcing mandatory timeouts, thread-safe rate limiting

@@ -20,9 +20,11 @@ def test_exception_hierarchy():
 
 
 def test_status_endpoint():
+    from fastapi.testclient import TestClient
+
     from server.api import app
 
-    client = fastapi.testclient.TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1:8000")
     response = client.get("/api/status")
     assert response.status_code == 200
     payload = response.json()

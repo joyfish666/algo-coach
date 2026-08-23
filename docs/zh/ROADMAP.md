@@ -10,7 +10,7 @@
 |---|---|---|
 | 0 | 仓库骨架：LICENSE / .gitignore / pyproject / web 脚手架 / 双语 README / docs 目录 / CI 配置 | ✅ 已完成 |
 | 1 | lc 核心：config / auth / i18n / logutil / exceptions / langs / httpclient / sites.cn | ✅ 已完成 |
-| 2 | problems + server API（题库同步、缓存、续传） | ⬜ 待实施 |
+| 2 | problems + server API（题库同步、缓存、续传） | ✅ 已完成 |
 | 3 | 前端骨架：tokens.css 双主题 / 侧边栏布局 / router / ThemeSwitch / i18n / 路由守卫 | ◐ 骨架已就位，待完整实现 |
 | 4 | 答题工作台：ProblemDetail + CodeEditor + Run/Submit + 结果面板 + 自定义用例面板 | ⬜ 待实施 |
 | 5 | 题库列表页 + setup 向导 + daily | ⬜ 待实施 |
