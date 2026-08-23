@@ -1,5 +1,6 @@
 <script setup>
-import { onMounted, watch } from 'vue'
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 
 import LanguageSwitch from './components/LanguageSwitch.vue'
 import ThemeSwitch from './components/ThemeSwitch.vue'
@@ -10,11 +11,30 @@ import { useThemeStore } from './stores/theme'
 const i18n = useI18nStore()
 const status = useStatusStore()
 const theme = useThemeStore()
+const route = useRoute()
+
+const authExpired = ref(false)
+
+function onAuthExpired() {
+  authExpired.value = true
+}
 
 onMounted(() => {
   theme.init()
   status.refresh()
+  window.addEventListener('algocoach:auth-expired', onAuthExpired)
 })
+
+onBeforeUnmount(() => {
+  window.removeEventListener('algocoach:auth-expired', onAuthExpired)
+})
+
+watch(
+  () => route.path,
+  (path) => {
+    if (path === '/setup') authExpired.value = false
+  }
+)
 
 watch(
   () => i18n.lang,
@@ -87,6 +107,21 @@ watch(
     <main class="content">
       <RouterView />
     </main>
+
+    <div v-if="authExpired" class="auth-banner" data-testid="auth-expired-banner">
+      <span>{{ i18n.t('cookie_invalid') }}</span>
+      <button
+        class="btn btn-primary btn-sm"
+        type="button"
+        data-testid="banner-relogin"
+        @click="authExpired = false; $router.push('/setup')"
+      >
+        {{ i18n.t('action_relogin') }}
+      </button>
+      <button class="btn btn-ghost btn-sm" type="button" @click="authExpired = false">
+        {{ i18n.t('dismiss') }}
+      </button>
+    </div>
   </div>
 </template>
 
@@ -164,5 +199,26 @@ nav {
 .content {
   flex: 1;
   min-width: 0;
+}
+
+.auth-banner {
+  align-items: center;
+  backdrop-filter: blur(4px);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-card);
+  bottom: var(--space-6);
+  box-shadow: var(--shadow-card);
+  display: flex;
+  gap: var(--space-3);
+  left: 50%;
+  padding: var(--space-3) var(--space-4);
+  position: fixed;
+  transform: translateX(-50%);
+  z-index: 50;
+}
+
+.btn-sm {
+  padding: var(--space-1) var(--space-4);
 }
 </style>

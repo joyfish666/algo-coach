@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Problems list, setup wizard and daily page (stage 5): a card-based problem list with local
+  keyword/difficulty/tag filtering (non-numeric frontend ids like 剑指 Offer searchable), local
+  pagination, premium and unsupported-category markers, one-click sync with per-second progress
+  polling, expected-duration messaging and completion feedback; a three-step setup wizard that
+  validates the pasted cookie against the backend before proceeding, optionally collects LLM
+  credentials and finishes with language plus theme preferences; a daily-problem card linking to
+  the workbench; a global auth-expired banner triggered by any 401 AuthError response guiding the
+  user back to setup, closing the cookie-expiry loop; and an update-cookie shortcut on the
+  settings page.
 - Answering workbench (stage 4): judge pipeline with save-before-judge semantics, run mode via
   the remote interpret flow that never enters submission history, submit mode with bounded
   polling (120s) handling intermediate states and an explicit status-unknown verdict carrying the

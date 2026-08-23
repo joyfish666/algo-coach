@@ -93,6 +93,9 @@ async function saveDefaultLanguage() {
           {{ cookieConfigured ? i18n.t('cookie_configured') : i18n.t('cookie_missing') }}
         </span>
         <span v-else class="placeholder">API: 127.0.0.1:8000</span>
+        <RouterLink class="btn btn-ghost btn-sm" to="/setup" data-testid="update-cookie-link">
+          {{ i18n.t('update_cookie') }}
+        </RouterLink>
       </div>
     </div>
   </section>
@@ -114,5 +117,9 @@ async function saveDefaultLanguage() {
 .saved-hint {
   color: var(--accent);
   font-size: var(--font-size-caption);
+}
+
+.btn-sm {
+  padding: var(--space-1) var(--space-4);
 }
 </style>

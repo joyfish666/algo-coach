@@ -6,6 +6,14 @@ async function handle(response) {
     } catch {
       /* non-json error body */
     }
+    if (
+      response.status === 401 &&
+      payload && payload.error && payload.error.kind === 'AuthError'
+    ) {
+      window.dispatchEvent(
+        new CustomEvent('algocoach:auth-expired', { detail: payload.error })
+      )
+    }
     const error = new Error(
       (payload && payload.error && payload.error.message) || `HTTP ${response.status}`
     )
@@ -29,7 +37,16 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     }),
+  validateCookie: (cookie) =>
+    request('/api/setup/validate-cookie', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cookie }),
+    }),
   getProblems: () => request('/api/problems'),
+  startSync: () =>
+    request('/api/problems/sync', { method: 'POST' }),
+  getSyncProgress: () => request('/api/problems/sync/progress'),
   getDaily: () => request('/api/daily'),
   getProblem: (qid) => request(`/api/problem/${encodeURIComponent(qid)}`),
   getTemplate: (qid, lang) =>
