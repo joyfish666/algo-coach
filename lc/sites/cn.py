@@ -462,16 +462,37 @@ def humanize_bytes(num) -> str:
     return f"{value:.1f} GB"
 
 
+_FINISH_FALLBACK_KEYS = (
+    "status_code",
+    "task_finish_time",
+    "run_success",
+    "code_answer",
+    "compile_error",
+    "runtime_error",
+)
+
+
 def normalize_check_payload(payload: dict, *, fallback_submission_id: str = "") -> dict:
     """Single-point normalization of submission/interpret check payloads.
 
     Classification relies on the human-readable status_msg first so that
-    status-code drift between sites degrades gracefully instead of crashing.
+    status-code drift between sites degrades gracefully instead of crashes.
+    Interpret runs sometimes omit state/status_msg entirely; presence of any
+    strong result marker then counts as finished.
     """
     if not isinstance(payload, dict):
         raise NetworkError("check payload is not an object")
     state = str(payload.get("state", "") or "").upper()
-    finished = state == "FINISHED" or "status_msg" in payload and state != "STARTED"
+    has_marker = any(
+        payload.get(key) is not None and payload.get(key) != "" and payload.get(key) != []
+        for key in _FINISH_FALLBACK_KEYS
+        if key != "run_success"
+    ) or payload.get("run_success") is True
+    finished = (
+        state == "FINISHED"
+        or (bool(state) and state not in ("STARTED", "PENDING"))
+        or (not state and has_marker)
+    )
     status_code = payload.get("status_code")
     run_success = bool(payload.get("run_success"))
     runtime = payload.get("runtime")

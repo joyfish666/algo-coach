@@ -223,3 +223,23 @@ def test_check_payload_classification_variants():
     assert ce["status_key"] == "compile_error"
     running = normalize_check_payload({"state": "STARTED"})
     assert running["finished"] is False
+
+
+def test_check_payload_interpret_style_without_state_counts_as_finished():
+    from lc.sites.cn import normalize_check_payload
+
+    interpret_done = normalize_check_payload({
+        "run_success": True,
+        "code_answer": ["[0,1]"],
+        "code_output": [],
+        "std_output_list": [],
+    })
+    assert interpret_done["finished"] is True
+    assert interpret_done["status_key"] == "accepted"
+
+    interpret_err = normalize_check_payload({"compile_error": "oops"})
+    assert interpret_err["finished"] is True
+    assert interpret_err["status_key"] == "compile_error"
+
+    empty_pending = normalize_check_payload({"foo": 1})
+    assert empty_pending["finished"] is False

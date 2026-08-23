@@ -173,6 +173,14 @@ function applyError(err) {
   if (keyFromServer) {
     const translated = i18n.t(keyFromServer)
     errorText.value = translated !== keyFromServer ? translated : keyFromServer
+    const detail = err.payload?.error?.detail
+    if (detail && detail.last_poll) {
+      try {
+        errorText.value +=
+          '\n' + JSON.stringify(detail.last_poll).slice(0, 400)
+      } catch {
+      }
+    }
     return
   }
   if (err && err.status === 403) {

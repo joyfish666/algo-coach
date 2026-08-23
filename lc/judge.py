@@ -50,15 +50,16 @@ def judge_run(
     """Run mode: interpret remotely against the given input."""
     started = time.monotonic()
     verdict = adapter.run_code(slug, question_id, code, lang, input_text)
-    while not verdict.get("finished"):
+    last = verdict
+    while not last.get("finished"):
         if time.monotonic() - started >= max_wait:
             raise JudgeError(
-                "interpret result did not finish in time",
-                detail={"slug": slug},
+                t("run_timeout"),
+                detail={"submission_id": last.get("submission_id", ""), "last_poll": last},
             )
         _sleep(poll_interval)
-        verdict = adapter.poll_submission(verdict.get("submission_id", ""))
-    return verdict
+        last = adapter.poll_submission(verdict.get("submission_id", ""))
+    return last
 
 
 def judge_submit(
