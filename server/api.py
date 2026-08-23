@@ -24,6 +24,7 @@ from urllib.parse import urlparse
 
 import lc
 from lc import auth, judge, problems
+from lc.archive import Archive, build_record, compute_stats, recommend_problems, tag_mastery
 from lc.config import effective_config, save as save_config, workspace_root_path
 from lc.exceptions import (
     AlgoCoachError,
@@ -37,6 +38,7 @@ from lc.exceptions import (
 from lc.httpclient import HttpClient
 from lc.i18n import t
 from lc.langs import DEFAULT_LANGUAGE, is_supported
+from lc.llm import LLMClient
 from lc.logutil import logger
 from lc.sites.cn import LeetCodeCnAdapter
 
@@ -46,6 +48,18 @@ DEV_ORIGINS = ("http://localhost:5173", "http://127.0.0.1:5173")
 app = FastAPI(title="AlgoCoach", version=lc.__version__)
 
 _sync_engine = problems.SyncEngine()
+_archive_lock = threading.Lock()
+_archive: Archive | None = None
+
+
+def get_archive() -> Archive:
+    global _archive
+    with _archive_lock:
+        if _archive is None:
+            from lc.config import archive_path
+
+            _archive = Archive(archive_path())
+        return _archive
 
 
 def create_adapter() -> LeetCodeCnAdapter:
@@ -379,6 +393,38 @@ def put_solution(qid: str, payload: SolutionPayload):
     return {"slug": qid, "lang": payload.lang, "saved": True, "mtime": path.stat().st_mtime}
 
 
+def _problem_row_for(slug: str, adapter=None) -> dict:
+    cache = problems.load_problems()
+    row = next((p for p in cache["problems"] if p.get("slug") == slug), None)
+    if row is not None:
+        return row
+    if adapter is None:
+        return {}
+    try:
+        detail = adapter.fetch_question_detail(slug)
+        summary = problems.summary_from_detail(detail)
+        problems.upsert_summary_into_cache(summary)
+        logger.info("self-healed problem cache entry for %s", slug)
+        return problems.decorate_problem_row(summary)
+    except AlgoCoachError as exc:
+        logger.warning("could not self-heal problem %s: %s", slug, exc)
+        return {}
+
+
+def _archive_verdict(slug: str, lang: str, verdict: dict, adapter=None) -> dict:
+    row = _problem_row_for(slug, adapter=adapter)
+    record = build_record(
+        slug=slug,
+        frontend_id=row.get("frontend_id", ""),
+        submission_id=verdict.get("submission_id", ""),
+        lang=lang,
+        verdict=verdict,
+        problem_row=row,
+    )
+    get_archive().append(record)
+    return record
+
+
 def _resolve_judge_context(slug: str) -> tuple:
     workspace = _workspace_root()
     directory = problems.find_problem_dir(workspace, slug)
@@ -456,12 +502,208 @@ def judge_submit_endpoint(payload: JudgeSubmitPayload):
         raise HTTPException(status_code=422, detail=f"unsupported language: {payload.lang}")
     directory, question_id = _resolve_judge_context(payload.qid)
     problems.save_solution(directory, payload.lang, payload.code)
+    adapter = create_adapter()
     verdict = judge.judge_submit(
-        create_adapter(),
+        adapter,
         slug=payload.qid,
         question_id=question_id,
         code=payload.code,
         lang=payload.lang,
     )
     verdict["mode"] = "submit"
+    record = _archive_verdict(payload.qid, payload.lang, verdict, adapter=adapter)
+    verdict["archived"] = True
     return verdict
+
+
+def _build_llm() -> LLMClient:
+    config = effective_config()
+    api_key = str(config.get("llm_api_key", "") or "")
+    base_url = str(config.get("llm_base_url", "") or "")
+    if not api_key or not base_url:
+        raise HTTPException(status_code=400, detail=t("ask_not_configured"))
+    return LLMClient(
+        base_url=base_url,
+        api_key=api_key,
+        model=str(config.get("llm_model", "") or "gpt-4o-mini"),
+        timeout=float(config.get("llm_timeout", 120.0)),
+    )
+
+
+COACH_SYSTEM_PROMPT = (
+    "你是 AlgoCoach，一位耐心的算法学习教练。用简体中文回答：先给思路要点，"
+    "再给复杂度分析；用户要求代码时给关键实现即可。若提供了题目与判定上下文，"
+    "结合它们作答；没有则按通用算法问题处理。"
+)
+
+
+class AskPayload(BaseModel):
+    question: str
+    history: list = []
+    qid: str | None = None
+
+
+@app.post("/api/ask")
+def ask_endpoint(payload: AskPayload):
+    llm = _build_llm()
+    context_parts = []
+
+    row = {}
+    if payload.qid:
+        row = _problem_row_for(payload.qid)
+    if row:
+        tags = "、".join(
+            (tag.get("name_zh") or tag.get("name_en") or "") for tag in (row.get("tags") or [])[:6]
+        )
+        context_parts.append(
+            f"当前题目: {row.get('frontend_id', '')} {row.get('title_cn', '') or row.get('title_en', '')}"
+            f"（难度 {row.get('difficulty', '?')}，标签 {tags or '无'}）"
+        )
+        verdict = get_archive().latest_by_slug().get(payload.qid)
+        if verdict:
+            passed = f"{verdict.get('total_correct', '?')}/{verdict.get('total_testcases', '?')}"
+            context_parts.append(
+                f"上次判定: {verdict.get('status', 'unknown')}，通过用例 {passed}，"
+                f"用时 {verdict.get('runtime_display') or '—'}，内存 {verdict.get('memory_display') or '—'}"
+            )
+
+    system_prompt = COACH_SYSTEM_PROMPT
+    if context_parts:
+        system_prompt += "\n\n参考上下文:\n" + "\n".join(context_parts)
+
+    messages = [{"role": "system", "content": system_prompt}]
+    for item in (payload.history or [])[-12:]:
+        if isinstance(item, dict) and item.get("role") in ("user", "assistant") and item.get("content"):
+            messages.append({"role": item["role"], "content": str(item["content"])[:4000]})
+    messages.append({"role": "user", "content": payload.question})
+
+    answer = llm.chat(messages)
+    return {"answer": answer, "model": llm.model}
+
+
+class AnalyzePayload(BaseModel):
+    use_llm: bool = True
+    limit: int = 100
+
+
+@app.post("/api/analyze")
+def analyze_endpoint(payload: AnalyzePayload):
+    archive = get_archive()
+    latest_index = archive.latest_by_slug()
+    stats = compute_stats(latest_index)
+    stats["attempts_total"] = archive.attempts_total()
+    tags = tag_mastery(latest_index)
+    weak_tags = [item for item in tags if item["attempted"] > 0][:10]
+    recommendations = recommend_problems(problems.load_problems()["problems"], latest_index, weak_tags)
+
+    ai_report = None
+    ai_configured = False
+    if payload.use_llm:
+        try:
+            llm = _build_llm()
+            ai_configured = True
+            digest_lines = [
+                f"- 解出 {stats['solved_total']} 题"
+                f"（Easy {stats['by_difficulty']['easy']} / Medium {stats['by_difficulty']['medium']}"
+                f" / Hard {stats['by_difficulty']['hard']}），累计尝试 {stats['attempts_total']} 次"
+            ]
+            if weak_tags:
+                weak_text = ", ".join(
+                    f"{t['name_zh']}(掌握 {int(t['mastered'] * 100)}%)" for t in weak_tags[:5]
+                )
+                digest_lines.append(f"- 薄弱标签: {weak_text}")
+            if recommendations:
+                rec_text = ", ".join(
+                    f"{r.get('frontend_id','')} {r.get('title_cn','')}" for r in recommendations
+                )
+                digest_lines.append(f"- 推荐练习候选: {rec_text}")
+            report_messages = [
+                {
+                    "role": "system",
+                    "content": COACH_SYSTEM_PROMPT
+                    + "\n\n现在请基于以下本地练习数据，写一份简短的薄弱点分析与下周练习建议（150字内）。"
+                    "数据:\n" + "\n".join(digest_lines),
+                },
+                {"role": "user", "content": "请生成我的学习报告。"},
+            ]
+            ai_report = llm.chat(report_messages)
+        except HTTPException:
+            ai_configured = False
+        except AlgoCoachError as exc:
+            logger.warning("analyze AI report failed: %s", exc)
+            ai_report = None
+
+    return {
+        "stats": stats,
+        "tags": tags,
+        "recommendations": recommendations,
+        "ai_report": ai_report,
+        "ai_configured": ai_configured,
+    }
+
+
+@app.get("/api/archive/recent")
+def archive_recent(limit: int = 50):
+    capped = max(1, min(int(limit), 200))
+    return {"records": get_archive().recent(capped)}
+
+
+class ImportSitePayload(BaseModel):
+    limit: int = 20
+
+
+_STATUS_TEXT_RULES = (
+    ("accept", "accepted"),
+    ("wrong", "wrong_answer"),
+    ("compile", "compile_error"),
+    ("runtime", "runtime_error"),
+    ("time limit", "tle"),
+    ("memory limit", "mle"),
+    ("output limit", "ole"),
+)
+
+
+def _classify_site_status(text: str) -> str:
+    lowered = (text or "").lower()
+    for marker, key in _STATUS_TEXT_RULES:
+        if marker in lowered:
+            return key
+    return "other"
+
+
+@app.post("/api/archive/import-site")
+def import_site(payload: ImportSitePayload):
+    adapter = create_adapter()
+    items = adapter.fetch_recent_submissions(min(max(1, int(payload.limit)), 20))
+    cache_rows = problems.load_problems()["problems"]
+    by_slug = {row.get("slug"): row for row in cache_rows}
+
+    imported = 0
+    skipped = 0
+    for item in items:
+        if not item.get("submission_id") or get_archive().has_submission(item["submission_id"]):
+            skipped += 1
+            continue
+        row = by_slug.get(item["slug"], {})
+        if not row and item.get("frontend_id"):
+            row = {"frontend_id": item["frontend_id"], "title_cn": item.get("title_cn", "")}
+        record = build_record(
+            slug=item["slug"],
+            frontend_id=row.get("frontend_id", item.get("frontend_id", "")),
+            submission_id=item["submission_id"],
+            lang=item.get("lang", ""),
+            verdict={"status_key": _classify_site_status(item.get("status", ""))},
+            problem_row=row,
+        )
+        if item.get("timestamp", "").isdigit():
+            from datetime import datetime, timezone
+
+            record["timestamp"] = datetime.fromtimestamp(
+                int(item["timestamp"]), tz=timezone.utc
+            ).isoformat(timespec="seconds")
+        get_archive().append(record)
+        imported += 1
+
+    result = {"imported": imported, "skipped": skipped}
+    logger.info("site import: %s", result)
+    return result

@@ -11,6 +11,7 @@
 - **自定义用例输入序列化格式**：testcases.txt 与远程 interpret 接口的输入格式转换需注意（实现时验证并在此记录）。
 - **GraphQL 字段名待真网回填**：sites/cn.py 的查询文档与字段名（如 `titleCn`/`nameTranslated`/`categoryTitle`/`todayRecord`）基于公开 schema 组织。阶段 2 冒烟已验证 `/graphql` 端点连通与 Cookie 失效识别链路；字段级验证在题库全量同步真网 integration 时逐一确认，差异回填本条目。
 - **判定接口形态待真网验证**：submit 走 REST（POST /problems/{slug}/submit/ → 轮询 /submissions/detail/{id}/check/），run 走 GraphQL interpretSolution mutation 后复用同一 check 端点轮询；结果分类优先依据 status_msg 文本而非 status_code 数字（两站数字语义有漂移风险）。真网实测 two-sum 与剑指 Offer 后回填差异。
+- **recentSubmissionList 字段待回填**：导入用查询请求 `id/titleSlug/translatedTitle/statusDisplay/lang/timestamp`；若真网返回字段不同（如无 titleSlug 只有 url），在 sites/cn.py 单点修正解析并回填本条。
 - **TestClient 需本地 base_url**：Origin/Host 守卫会拒绝非本机 Host，pytest 必须用 `TestClient(app, base_url="http://127.0.0.1:8000")`，curl POST 需带 `-H "Origin: http://localhost:5173"`。
 
 ## Cookie 失效识别（三形态）

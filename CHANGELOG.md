@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Archive, LLM and analytics layer (stage 6): an append-only JSON Lines submission archive whose
+  records embed difficulty/tags/lang plus full verdict fields so one line powers analytics and AI
+  reports; a lock-guarded qid→latest-verdict index with startup reload and torn-line tolerance;
+  submit-mode verdicts now archive automatically (run mode never does) with cache self-healing
+  enrichment; site import of the last ~20 recent submissions deduplicated by submission_id; a
+  stateless OpenAI-compatible client reusing forced timeouts but no rate limiting or site header
+  injection; POST /api/ask combining current problem info and the latest archived verdict as
+  context with server-side history trimming; POST /api/analyze producing solved counts by
+  difficulty, weakest-first tag mastery and heuristic recommendations from unsolved problems
+  sharing weak tags, optionally enriched with an AI weakness report when an LLM key is configured.
+- Workbench AI sidebar and analytics UI: a floating AI coach panel on the problem page holding
+  the conversation statelessly in the frontend; the analyze page renders stat cards, a
+  hand-written SVG horizontal tag-mastery chart (weak to strong), recommended-practice links,
+  an import button with result feedback and a markdown-rendered AI report behind an explicit
+  generate action.
 - Problems list, setup wizard and daily page (stage 5): a card-based problem list with local
   keyword/difficulty/tag filtering (non-numeric frontend ids like 剑指 Offer searchable), local
   pagination, premium and unsupported-category markers, one-click sync with per-second progress

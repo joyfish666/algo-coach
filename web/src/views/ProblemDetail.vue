@@ -4,6 +4,7 @@ import { onBeforeRouteLeave } from 'vue-router'
 import MarkdownIt from 'markdown-it'
 
 import CodeEditor from '../components/CodeEditor.vue'
+import AiChatSidebar from '../components/AiChatSidebar.vue'
 import JudgeResultPanel from '../components/JudgeResultPanel.vue'
 import PageHeader from '../components/PageHeader.vue'
 import { api } from '../api'
@@ -363,6 +364,8 @@ onBeforeUnmount(() => {
         :show-input="verdict.mode === 'run'"
       />
     </template>
+
+    <AiChatSidebar v-if="problem && problem.supported !== false" :qid="problem.slug || props.qid" />
   </section>
 </template>
 

@@ -1,0 +1,248 @@
+<script setup>
+import { nextTick, ref } from 'vue'
+
+import { api } from '../api'
+import { useI18nStore } from '../stores/i18n'
+
+const props = defineProps({
+  qid: { type: String, required: true },
+})
+
+const i18n = useI18nStore()
+
+const open = ref(false)
+const messages = ref([])
+const draft = ref('')
+const pending = ref(false)
+const listEl = ref(null)
+
+async function toggle() {
+  open.value = !open.value
+}
+
+function scrollToEnd() {
+  nextTick(() => {
+    if (listEl.value) {
+      listEl.value.scrollTop = listEl.value.scrollHeight
+    }
+  })
+}
+
+async function send() {
+  const question = draft.value.trim()
+  if (!question || pending.value) return
+  draft.value = ''
+  messages.value.push({ role: 'user', content: question })
+  pending.value = true
+  scrollToEnd()
+  try {
+    const history = messages.value.slice(-13, -1).map((m) => ({
+      role: m.role,
+      content: m.content,
+    }))
+    const data = await api.ask({ question, history, qid: props.qid })
+    messages.value.push({ role: 'assistant', content: data.answer })
+  } catch (err) {
+    const message =
+      (err.payload && err.payload.detail) ||
+      (err.payload && err.payload.error && err.payload.error.message) ||
+      err.message
+    messages.value.push({ role: 'assistant', content: `⚠️ ${message}`, error: true })
+  } finally {
+    pending.value = false
+    scrollToEnd()
+  }
+}
+
+function onEnter(event) {
+  if (event.shiftKey) return
+  event.preventDefault()
+  send()
+}
+</script>
+
+<template>
+  <button
+    v-if="!open"
+    class="fab"
+    type="button"
+    :title="i18n.t('ai_title')"
+    data-testid="ai-open"
+    @click="toggle"
+  >
+    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12 3.5c2.2 2.8 4.4 4.2 7.5 5-3.1 0.8-5.3 2.2-7.5 5-2.2-2.8-4.4-4.2-7.5-5 3.1-0.8 5.3-2.2 7.5-5z" />
+      <path d="M18.5 15.5c0.9 1.2 1.9 1.8 3.2 2.1-1.3 0.3-2.3 0.9-3.2 2.1-0.9-1.2-1.9-1.8-3.2-2.1 1.3-0.3 2.3-0.9 3.2-2.1z" />
+    </svg>
+    <span class="fab-label">{{ i18n.t('ai_open') }}</span>
+  </button>
+
+  <aside v-else class="panel card" data-testid="ai-panel">
+    <header class="panel-head">
+      <h2>{{ i18n.t('ai_title') }}</h2>
+      <button class="close" type="button" :title="i18n.t('ai_close')" @click="toggle">
+        ✕
+      </button>
+    </header>
+    <p class="context-hint">{{ i18n.t('ai_context_hint') }}</p>
+
+    <div ref="listEl" class="messages">
+      <p v-if="!messages.length && !pending" class="empty">{{ i18n.t('ai_placeholder') }}</p>
+      <div
+        v-for="(message, index) in messages"
+        :key="index"
+        class="bubble"
+        :class="[message.role, { error: message.error }]"
+      >
+        {{ message.content }}
+      </div>
+      <div v-if="pending" class="bubble assistant pending">…</div>
+    </div>
+
+    <footer class="composer">
+      <textarea
+        v-model="draft"
+        class="input composer-input"
+        rows="2"
+        :placeholder="i18n.t('ai_placeholder')"
+        :disabled="pending"
+        @keydown.enter="onEnter"
+      ></textarea>
+      <button
+        class="btn btn-primary btn-sm"
+        type="button"
+        :disabled="pending || !draft.trim()"
+        @click="send"
+      >
+        {{ i18n.t('ai_send') }}
+      </button>
+    </footer>
+  </aside>
+</template>
+
+<style scoped>
+.fab {
+  align-items: center;
+  background: var(--accent);
+  border: none;
+  border-radius: var(--radius-pill);
+  bottom: var(--space-6);
+  box-shadow: var(--shadow-card);
+  color: #ffffff;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-3);
+  position: fixed;
+  right: var(--space-6);
+  z-index: 39;
+}
+
+.fab-label {
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 120px);
+  max-width: 380px;
+  position: fixed;
+  right: var(--space-6);
+  top: var(--space-6);
+  width: 340px;
+  z-index: 40;
+}
+
+.panel-head {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+
+.panel-head h2 {
+  font-size: var(--font-size-title);
+  margin-bottom: 0;
+}
+
+.close {
+  background: transparent;
+  border: none;
+  color: var(--gray-neutral);
+  font-size: var(--font-size-title);
+}
+
+.context-hint {
+  color: var(--gray-neutral);
+  font-size: var(--font-size-caption);
+  margin: var(--space-1) 0 0;
+}
+
+.messages {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-card);
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+  overflow-y: auto;
+  padding: var(--space-3);
+}
+
+.empty {
+  color: var(--gray-neutral);
+  font-size: var(--font-size-caption);
+  text-align: center;
+}
+
+.bubble {
+  border-radius: var(--radius-card);
+  font-size: var(--font-size-body);
+  line-height: 1.55;
+  max-width: 88%;
+  padding: var(--space-2) var(--space-3);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.bubble.user {
+  align-self: flex-end;
+  background: var(--accent);
+  color: #ffffff;
+}
+
+.bubble.assistant {
+  align-self: flex-start;
+  background: var(--bg-secondary);
+}
+
+.bubble.pending {
+  animation: pulse 1s infinite;
+  color: var(--gray-neutral);
+}
+
+@keyframes pulse {
+  50% {
+    opacity: 0.4;
+  }
+}
+
+.composer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.composer-input {
+  resize: none;
+  width: 100%;
+}
+
+.btn-sm {
+  align-self: flex-end;
+}
+</style>

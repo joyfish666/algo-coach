@@ -99,6 +99,20 @@ mutation interpretSolutionRun($id: ID!, $code: String!, $lang: String!, $input: 
 }
 """
 
+RECENT_SUBMISSIONS_QUERY = """
+query recentSubmissionFeed($limit: Int!) {
+  recentSubmissionList(limit: $limit) {
+    id
+    title
+    titleSlug
+    translatedTitle
+    statusDisplay
+    lang
+    timestamp
+  }
+}
+"""
+
 DAILY_QUESTION_QUERY = """
 query todayQuestionRecord {
   todayRecord {
@@ -285,6 +299,20 @@ class LeetCodeCnAdapter(SiteAdapter):
             token = self.client.default_headers.get("X-CSRFToken", "")
             return token
 
+    def fetch_recent_submissions(self, limit: int = 20) -> list:
+        """Site-side recent submissions (capability boundary: about 20)."""
+        capped = max(1, min(int(limit), 20))
+        data = self._graphql(
+            "recentSubmissionFeed", RECENT_SUBMISSIONS_QUERY, {"limit": capped}
+        )
+        feed = data.get("recentSubmissionList") or []
+        normalized = []
+        for raw in feed:
+            item = normalize_site_submission(raw)
+            if item is not None:
+                normalized.append(item)
+        return normalized
+
 
 def normalize_tag(raw) -> dict:
     if not isinstance(raw, dict):
@@ -359,6 +387,26 @@ def normalize_question_detail(raw) -> dict:
         }
     )
     return detail
+
+
+def normalize_site_submission(raw: dict) -> dict | None:
+    """Normalize a recentSubmissionList item; None skips the row."""
+    if not isinstance(raw, dict):
+        return None
+    submission_id = raw.get("id") or raw.get("submission_id")
+    slug = raw.get("titleSlug") or raw.get("title_slug")
+    if not submission_id or not slug:
+        return None
+    return {
+        "submission_id": str(submission_id),
+        "slug": str(slug),
+        "frontend_id": str(raw.get("frontendQuestionId", "") or ""),
+        "title_cn": str(raw.get("translatedTitle", "") or raw.get("titleCn", "") or ""),
+        "title_en": str(raw.get("title", "") or ""),
+        "status": str(raw.get("statusDisplay", "") or ""),
+        "lang": str(raw.get("lang", "") or ""),
+        "timestamp": str(raw.get("timestamp", "") or ""),
+    }
 
 
 _STATUS_KEY_RULES = (
