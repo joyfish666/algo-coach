@@ -289,10 +289,21 @@ def update_settings(payload: SettingsUpdate):
 @app.get("/api/problems")
 def get_problems():
     payload = problems.load_problems()
+    latest = get_archive().latest_by_slug()
+    rows = []
+    for row in payload.get("problems", []):
+        verdict = latest.get(row.get("slug"))
+        if verdict:
+            row = {
+                **row,
+                "practice_status": verdict.get("status"),
+                "last_practice_at": verdict.get("timestamp"),
+            }
+        rows.append(row)
     return {
         "total": payload.get("total", 0),
         "synced_at": payload.get("synced_at"),
-        "problems": payload.get("problems", []),
+        "problems": rows,
     }
 
 

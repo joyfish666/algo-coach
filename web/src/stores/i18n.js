@@ -149,6 +149,11 @@ export const MESSAGES = {
     clear_confirm:
       '将删除题库缓存、练习归档、工作区文件以及配置（含 Cookie）。此操作不可恢复，确定继续？',
     cleared_ok: '已清除，请重新配置。',
+    status_solved: '已通过',
+    status_attempted: '尝试过',
+    sort_id: '按题号排序',
+    sort_recent: '最近练习优先',
+    llm_key_saved_hint: 'Key 已保存在本机；留空表示不修改',
   },
   en: {
     nav_problems: 'Problems',
@@ -301,6 +306,11 @@ export const MESSAGES = {
     clear_confirm:
       'This deletes the problem cache, practice archive, workspace files and your config (cookie included). It cannot be undone. Continue?',
     cleared_ok: 'Erased. Please set up again.',
+    status_solved: 'Solved',
+    status_attempted: 'Attempted',
+    sort_id: 'By problem number',
+    sort_recent: 'Recent practice first',
+    llm_key_saved_hint: 'Key is saved locally; leave empty to keep it',
   },
 }
 

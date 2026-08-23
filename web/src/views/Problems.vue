@@ -1,17 +1,19 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 
 import PageHeader from '../components/PageHeader.vue'
 import ProblemCard from '../components/ProblemCard.vue'
 import { api } from '../api'
 import { useI18nStore } from '../stores/i18n'
 import { useStatusStore } from '../stores/status'
-import { collectTags, filterProblems, paginate } from '../utils/problems'
+import { collectTags, filterProblems, paginate, sortByMode } from '../utils/problems'
 
 const PAGE_SIZE = 50
 
 const i18n = useI18nStore()
 const status = useStatusStore()
+const route = useRoute()
 
 const problems = ref([])
 const syncedAt = ref(null)
@@ -21,6 +23,7 @@ const listError = ref('')
 const keyword = ref('')
 const difficulty = ref('')
 const tagSlug = ref('')
+const sortMode = ref('id')
 
 const page = ref(1)
 
@@ -33,6 +36,21 @@ let pollTimer = null
 
 const tagOptions = computed(() => collectTags(problems.value))
 
+function applyRouteQuery() {
+  if (route.path !== '/problems') return
+  const q = route.query
+  if (q.q !== undefined) keyword.value = String(q.q)
+  const diff = String(q.difficulty || '')
+  if (['easy', 'medium', 'hard'].includes(diff)) difficulty.value = diff
+  if (q.tag !== undefined) tagSlug.value = String(q.tag)
+}
+
+watch(() => route.fullPath, applyRouteQuery, { immediate: true })
+
+watch(keyword, () => (page.value = 1))
+watch(difficulty, () => (page.value = 1))
+watch(tagSlug, () => (page.value = 1))
+
 const filtered = computed(() =>
   filterProblems(problems.value, {
     keyword: keyword.value,
@@ -41,7 +59,7 @@ const filtered = computed(() =>
   })
 )
 
-const paged = computed(() => paginate(filtered.value, page.value, PAGE_SIZE))
+const paged = computed(() => paginate(sortByMode(filtered.value, sortMode.value), page.value, PAGE_SIZE))
 
 watch(keyword, () => (page.value = 1))
 watch(difficulty, () => (page.value = 1))
@@ -160,6 +178,10 @@ onBeforeUnmount(() => clearInterval(pollTimer))
         <option v-for="tag in tagOptions" :key="tag.slug" :value="tag.slug">
           {{ tag.name_zh || tag.name_en }} ({{ tag.count }})
         </option>
+      </select>
+      <select v-model="sortMode" class="select" data-testid="sort-select">
+        <option value="id">{{ i18n.t('sort_id') }}</option>
+        <option value="recent">{{ i18n.t('sort_recent') }}</option>
       </select>
     </div>
 

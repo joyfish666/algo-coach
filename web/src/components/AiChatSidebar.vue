@@ -1,5 +1,5 @@
 <script setup>
-import { nextTick, ref } from 'vue'
+import { nextTick, onBeforeUnmount, ref } from 'vue'
 
 import { api } from '../api'
 import { useI18nStore } from '../stores/i18n'
@@ -10,11 +10,71 @@ const props = defineProps({
 
 const i18n = useI18nStore()
 
+const POS_KEY = 'algocoach-ai-pos'
+const PANEL_WIDTH = 340
+const PANEL_HEIGHT = 520
+
 const open = ref(false)
 const messages = ref([])
 const draft = ref('')
 const pending = ref(false)
 const listEl = ref(null)
+const panelEl = ref(null)
+
+function readPos() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(POS_KEY))
+    if (raw && typeof raw.x === 'number' && typeof raw.y === 'number') return raw
+  } catch {
+  }
+  return null
+}
+
+const pos = ref(readPos())
+
+let dragOffset = null
+
+function clamp(x, y) {
+  const maxX = window.innerWidth - PANEL_WIDTH - 8
+  const maxY = window.innerHeight - PANEL_HEIGHT + 120
+  return {
+    x: Math.min(Math.max(8, x), Math.max(8, maxX)),
+    y: Math.min(Math.max(8, y), Math.max(8, maxY)),
+  }
+}
+
+function startDrag(event) {
+  if (event.target.closest('.close')) return
+  event.preventDefault()
+  const rect = panelEl.value?.getBoundingClientRect()
+  const current = rect
+    ? { x: rect.left, y: rect.top }
+    : { x: window.innerWidth - PANEL_WIDTH - 24, y: 24 }
+  dragOffset = { dx: event.clientX - current.x, dy: event.clientY - current.y }
+  document.body.style.userSelect = 'none'
+  window.addEventListener('mousemove', onDragMove)
+  window.addEventListener('mouseup', endDrag)
+}
+
+function onDragMove(event) {
+  if (!dragOffset) return
+  pos.value = clamp(event.clientX - dragOffset.dx, event.clientY - dragOffset.dy)
+}
+
+function endDrag() {
+  dragOffset = null
+  document.body.style.userSelect = ''
+  window.removeEventListener('mousemove', onDragMove)
+  window.removeEventListener('mouseup', endDrag)
+  try {
+    if (pos.value) localStorage.setItem(POS_KEY, JSON.stringify(pos.value))
+  } catch {
+  }
+}
+
+onBeforeUnmount(() => {
+  if (dragOffset) endDrag()
+})
 
 async function toggle() {
   open.value = !open.value
@@ -77,8 +137,13 @@ function onEnter(event) {
     <span class="fab-label">{{ i18n.t('ai_open') }}</span>
   </button>
 
-  <aside v-else class="panel card" data-testid="ai-panel">
-    <header class="panel-head">
+  <aside
+    ref="panelEl"
+    class="panel card"
+    :style="pos ? { left: pos.x + 'px', top: pos.y + 'px', right: 'auto' } : {}"
+    data-testid="ai-panel"
+  >
+    <header class="panel-head" @mousedown="startDrag">
       <h2>{{ i18n.t('ai_title') }}</h2>
       <button class="close" type="button" :title="i18n.t('ai_close')" @click="toggle">
         ✕
@@ -158,8 +223,10 @@ function onEnter(event) {
 
 .panel-head {
   align-items: center;
+  cursor: move;
   display: flex;
   justify-content: space-between;
+  user-select: none;
 }
 
 .panel-head h2 {

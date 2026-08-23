@@ -208,6 +208,39 @@ def test_sync_flow_with_progress_and_conflict(client, monkeypatch, tmp_path):
     assert body["total"] == 150
 
 
+def test_problems_list_enriches_practice_status(client):
+    import lc.config as config
+
+    cache_rows = [
+        {"slug": "two-sum", "frontend_id": "1", "title_cn": "两数之和",
+         "difficulty": "easy", "paid_only": False, "category": "Algorithms", "tags": []},
+        {"slug": "add-two-num", "frontend_id": "2", "title_cn": "两数相加",
+         "difficulty": "medium", "paid_only": False, "category": "Algorithms", "tags": []},
+    ]
+    cache_path = config.problems_cache_path()
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    cache_path.write_text(json.dumps({
+        "schema_version": 1, "synced_at": None,
+        "total": len(cache_rows), "problems": cache_rows,
+    }), encoding="utf-8")
+
+    archive = api_module.get_archive()
+    archive.append({
+        "schema": 1, "timestamp": "2026-08-23T10:00:00+00:00", "slug": "two-sum",
+        "frontend_id": "1", "submission_id": "s1", "lang": "cpp", "status": "accepted",
+        "runtime_display": "", "runtime_percentile": None, "memory_display": "",
+        "memory_percentile": None, "total_correct": 57, "total_testcases": 57,
+        "outputs": [], "expected_outputs": [], "compile_error": "", "runtime_error": "",
+        "difficulty": "easy", "tags": [], "category": "Algorithms",
+    })
+    body = client.get("/api/problems").json()
+    row = next(r for r in body["problems"] if r["slug"] == "two-sum")
+    assert row["practice_status"] == "accepted"
+    assert row["last_practice_at"] == "2026-08-23T10:00:00+00:00"
+    other = next(r for r in body["problems"] if r["slug"] == "add-two-num")
+    assert "practice_status" not in other
+
+
 def test_daily_endpoint(client, monkeypatch):
     daily_row = {"slug": "two-sum", "frontend_id": "1", "date": "2026-08-23"}
 

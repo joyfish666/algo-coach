@@ -88,14 +88,6 @@ query questionDetailBySlug($titleSlug: String!) {
 }
 """
 
-INTERPRET_MUTATION = """
-mutation interpretSolutionRun($id: ID!, $code: String!, $lang: String!, $input: String!) {
-  interpretSolution(id: $id, code: $code, lang: $lang, input: $input) {
-    interpretId
-  }
-}
-"""
-
 RECENT_SUBMISSIONS_QUERY = """
 query recentSubmissionFeed($limit: Int!, $offset: Int!) {
   submissionList(limit: $limit, offset: $offset) {
@@ -137,6 +129,7 @@ class LeetCodeCnAdapter(SiteAdapter):
 
     SUBMIT_PATH = "/problems/{slug}/submit/"
     CHECK_PATH = "/submissions/detail/{sid}/check/"
+    INTERPRET_PATH = "/problems/{slug}/interpret_solution/"
 
     def __init__(self, client=None):
         self._client = client
@@ -267,24 +260,39 @@ class LeetCodeCnAdapter(SiteAdapter):
         return normalize_check_payload(payload, fallback_submission_id=str(submission_id))
 
     def run_code(self, slug: str, question_id: str, code: str, lang: str, input_text: str) -> dict:
-        """Interpret solution remotely (does not enter submission history)."""
-        variables = {
-            "id": str(question_id),
-            "code": code,
-            "lang": lang,
-            "input": input_text,
-        }
-        data = self._graphql(
-            "interpretSolutionRun", INTERPRET_MUTATION, variables, idempotent=False
+        """Debug-run via the REST interpret endpoint (never enters history)."""
+        url = LEETCODE_CN_BASE + self.INTERPRET_PATH.format(slug=slug)
+        response = self.client.post(
+            url,
+            idempotent=False,
+            json={
+                "question_id": str(question_id),
+                "lang": lang,
+                "typed_code": code,
+                "input": input_text,
+            },
+            headers={
+                "Content-Type": "application/json",
+                "Referer": f"{LEETCODE_CN_BASE}/problems/{slug}/",
+            },
         )
-        output = data.get("interpretSolution")
-        interpret_id = None
-        if isinstance(output, dict):
-            interpret_id = output.get("interpretId") or output.get("interpret_id")
+        check_response(response, context="interpret_solution")
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise NetworkError("interpret_solution: response is not valid JSON") from exc
+        if not isinstance(payload, dict):
+            raise NetworkError("interpret_solution: unexpected payload")
+        interpret_id = (
+            payload.get("interpretation_id")
+            or payload.get("interpret_id")
+            or payload.get("interpretationId")
+            or payload.get("interpretId")
+        )
         if not interpret_id:
             raise JudgeError(
-                "interpretSolution: missing interpretId",
-                detail={"keys": sorted(output) if isinstance(output, dict) else []},
+                "interpret_solution: missing interpretation id",
+                detail={"keys": sorted(payload)},
             )
         return self.poll_submission(str(interpret_id))
 

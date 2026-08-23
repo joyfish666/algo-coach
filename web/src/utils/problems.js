@@ -22,6 +22,28 @@ export function paginate(rows, page, size) {
   }
 }
 
+export function compareById(a, b) {
+  const fa = String(a.frontend_id || '')
+  const fb = String(b.frontend_id || '')
+  if (fa && fb && /^\d+$/.test(fa) && /^\d+$/.test(fb)) {
+    return Number(fa) - Number(fb)
+  }
+  return fa.localeCompare(fb)
+}
+
+export function sortByMode(rows, mode) {
+  const list = [...(rows || [])]
+  if (mode === 'recent') {
+    return list.sort((a, b) => {
+      const ta = a.last_practice_at || ''
+      const tb = b.last_practice_at || ''
+      if (ta !== tb) return ta < tb ? 1 : -1
+      return compareById(a, b)
+    })
+  }
+  return list.sort(compareById)
+}
+
 export function collectTags(rows) {
   const bySlug = new Map()
   for (const row of rows || []) {

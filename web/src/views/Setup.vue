@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
 import PageHeader from '../components/PageHeader.vue'
@@ -25,6 +25,18 @@ const cookieError = ref('')
 const llmKey = ref('')
 const llmBaseUrl = ref('https://api.deepseek.com')
 const llmModel = ref('deepseek-v4-flash')
+const hasSavedLlmKey = ref(false)
+
+async function loadExistingLlm() {
+  try {
+    const settings = await api.getSettings()
+    if (settings.llm_base_url) llmBaseUrl.value = settings.llm_base_url
+    if (settings.llm_model) llmModel.value = settings.llm_model
+    hasSavedLlmKey.value = Boolean(settings.llm_api_key_masked)
+  } catch {
+    /* backend unreachable; keep defaults */
+  }
+}
 
 const codingLang = ref('cpp')
 const finishing = ref(false)
@@ -74,8 +86,17 @@ async function validateAndNext() {
   }
 }
 
+onMounted(() => {
+  if (status.configured || status.loaded) {
+    loadExistingLlm()
+  }
+})
+
 function goStep(target) {
   step.value = target
+  if (target === 2) {
+    loadExistingLlm()
+  }
 }
 
 function skipLlm() {
@@ -226,6 +247,7 @@ async function finish() {
         <div class="field">
           <span class="field-label">{{ i18n.t('llm_api_key') }}</span>
           <input v-model="llmKey" class="input wide" type="password" autocomplete="off" />
+          <span v-if="hasSavedLlmKey" class="hint-text">{{ i18n.t('llm_key_saved_hint') }}</span>
         </div>
         <div class="field">
           <span class="field-label">{{ i18n.t('llm_base_url') }}</span>

@@ -17,9 +17,12 @@ const i18n = useI18nStore()
 
 const md = new MarkdownIt({ html: false, linkify: false, breaks: false })
 
+const SPLIT_KEY = 'algocoach-workbench-split'
+const SPLIT_MIN = 18
+const SPLIT_MAX = 82
+
 const loading = ref(true)
 const errorText = ref('')
-const errorKey = ref('')
 const problem = ref(null)
 const code = ref('')
 const lang = ref('cpp')
@@ -32,7 +35,7 @@ const switchingLang = ref(false)
 const statementHtml = ref('')
 
 const useLocalCases = ref(false)
-const casesOpen = ref(false)
+const casesOpen = ref(true)
 const casesDraft = ref('')
 const casesSaving = ref(false)
 const casesSavedAt = ref('')
@@ -44,32 +47,71 @@ const verdict = ref(null)
 const restoreCandidate = ref(null)
 const showRestoreBar = ref(false)
 
-let autosaveTimer = null
+const leftPaneRef = ref(null)
+const rightColRef = ref(null)
 
-const difficultyLabel = computed(() => {
-  const map = { easy: 'Easy', medium: 'Medium', hard: 'Hard' }
-  return map[(problem.value?.difficulty || '').toLowerCase()] || ''
+function readSplit() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(SPLIT_KEY))
+    if (raw && typeof raw.mainPct === 'number' && typeof raw.editorPct === 'number') return raw
+  } catch {
+  }
+  return { mainPct: 42, editorPct: 66 }
+}
+
+const split = ref(readSplit())
+
+function persistSplit() {
+  try {
+    localStorage.setItem(SPLIT_KEY, JSON.stringify(split.value))
+  } catch {
+  }
+}
+
+let dragContext = null
+
+function clampPct(value) {
+  return Math.min(SPLIT_MAX, Math.max(SPLIT_MIN, Math.round(value * 10) / 10))
+}
+
+function onMouseMove(event) {
+  if (!dragContext) return
+  if (dragContext.axis === 'x') {
+    const rect = leftPaneRef.value?.getBoundingClientRect()
+    if (!rect) return
+    split.value.mainPct = clampPct(((event.clientX - rect.left) / rect.width) * 100)
+  } else {
+    const rect = rightColRef.value?.getBoundingClientRect()
+    if (!rect) return
+    split.value.editorPct = clampPct(((event.clientY - rect.top) / rect.height) * 100)
+  }
+}
+
+function onMouseUp() {
+  dragContext = null
+  document.body.style.cursor = ''
+  document.body.style.userSelect = ''
+  persistSplit()
+  window.removeEventListener('mousemove', onMouseMove)
+  window.removeEventListener('mouseup', onMouseUp)
+}
+
+function startDrag(axis) {
+  return (event) => {
+    event.preventDefault()
+    dragContext = { axis }
+    document.body.style.cursor = axis === 'x' ? 'col-resize' : 'row-resize'
+    document.body.style.userSelect = 'none'
+    window.addEventListener('mousemove', onMouseMove)
+    window.addEventListener('mouseup', onMouseUp)
+  }
+}
+
+onBeforeUnmount(() => {
+  onMouseUp()
 })
 
-const renderedStatement = computed(() => statementHtml.value)
-
-function applyError(err) {
-  const keyFromServer =
-    err && err.payload && err.payload.error && err.payload.error.message_key
-  if (keyFromServer) {
-    const translated = i18n.t(keyFromServer)
-    errorKey.value = translated !== keyFromServer ? keyFromServer : ''
-    errorText.value = translated
-    return
-  }
-  if (err && err.status === 403) {
-    errorKey.value = 'premium_problem'
-    errorText.value = i18n.t('premium_problem')
-    return
-  }
-  errorKey.value = ''
-  errorText.value = (err && err.message) || 'error'
-}
+const difficultyQuery = computed(() => (problem.value?.difficulty || '').toLowerCase())
 
 async function loadProblem() {
   loading.value = true
@@ -102,6 +144,21 @@ async function loadProblem() {
   }
 }
 
+function applyError(err) {
+  const keyFromServer =
+    err && err.payload && err.payload.error && err.payload.error.message_key
+  if (keyFromServer) {
+    const translated = i18n.t(keyFromServer)
+    errorText.value = translated !== keyFromServer ? translated : keyFromServer
+    return
+  }
+  if (err && err.status === 403) {
+    errorText.value = i18n.t('premium_problem')
+    return
+  }
+  errorText.value = (err && err.message) || 'error'
+}
+
 function scheduleAutosave() {
   clearTimeout(autosaveTimer)
   autosaveTimer = setTimeout(flushSave, 1200)
@@ -129,7 +186,6 @@ watch(lang, async (_next, prev) => {
   try {
     await api.putSolution(props.qid, prev, code.value)
   } catch {
-    /* keep going; template switch is the priority */
   }
   try {
     const result = await api.getTemplate(props.qid, _next)
@@ -234,7 +290,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="page">
+  <section class="page page-wide">
     <div v-if="loading" class="card empty-state">{{ i18n.t('loading_problem') }}</div>
 
     <template v-else-if="errorText">
@@ -264,98 +320,126 @@ onBeforeUnmount(() => {
       <PageHeader :title="problem.title_cn || problem.title_en || problem.slug">
         <template #subtitle>
           <span class="meta-row">
-            <span v-if="difficultyLabel" class="chip">{{ difficultyLabel }}</span>
+            <RouterLink
+              v-if="problem.difficulty"
+              class="chip chip-link"
+              :to="{ path: '/problems', query: { difficulty: problem.difficulty } }"
+            >
+              {{ problem.difficulty }}
+            </RouterLink>
             <span v-if="problem.paid_only" class="chip">★</span>
-            <span v-for="tag in (problem.tags || []).slice(0, 6)" :key="tag.slug" class="chip">
+            <RouterLink
+              v-for="tag in (problem.tags || []).slice(0, 6)"
+              :key="tag.slug"
+              class="chip chip-link"
+              :to="{ path: '/problems', query: { tag: tag.slug } }"
+            >
               {{ tag.name_zh || tag.name_en }}
-            </span>
+            </RouterLink>
             <code class="slug-code">#{{ problem.slug }}</code>
           </span>
         </template>
       </PageHeader>
 
-      <div class="panes">
-        <div class="left-col">
-          <div class="card statement-card">
+      <div class="wb" data-testid="workbench">
+        <section ref="leftPaneRef" class="pane left-pane" :style="{ width: split.mainPct + '%' }">
+          <div class="card pane-card">
             <h2>{{ i18n.t('problem_statement') }}</h2>
             <div class="statement" v-html="renderedStatement"></div>
           </div>
-
           <details v-if="(problem.hints || []).length" class="card hints-card">
             <summary>{{ (problem.hints || []).length }} × hint</summary>
             <ul>
               <li v-for="(hint, index) in problem.hints" :key="index">{{ hint }}</li>
             </ul>
           </details>
-        </div>
+        </section>
 
-        <div class="right-col">
-          <div class="card editor-card">
-            <div class="editor-head">
-              <h2>{{ i18n.t('problem_editor') }}</h2>
-              <select
-                v-model="lang"
-                class="select"
-                :disabled="switchingLang"
-                data-testid="editor-lang-select"
-              >
-                <option v-for="item in languages" :key="item.value" :value="item.value">
-                  {{ item.label }}
-                  <template v-if="!problem.languages_available.includes(item.value)"> ·</template>
-                </option>
-              </select>
-            </div>
-            <CodeEditor v-model="code" :lang="lang" />
-            <div class="actions-row">
-              <label class="use-local">
-                <input v-model="useLocalCases" type="checkbox" data-testid="use-local-cases" />
-                <span>{{ i18n.t('use_local_cases') }}</span>
-              </label>
-              <span class="spacer"></span>
-              <button
-                class="btn btn-ghost"
-                type="button"
-                :disabled="inflightRun"
-                data-testid="run-btn"
-                @click="runCode"
-              >
-                {{ i18n.t('run') }}
-              </button>
-              <button
-                class="btn btn-primary"
-                type="button"
-                :disabled="inflightSubmit"
-                data-testid="submit-btn"
-                @click="submitCode"
-              >
-                {{ i18n.t('submit') }}
-              </button>
+        <div
+          class="divider divider-v"
+          data-testid="divider-main"
+          @mousedown="startDrag('x')"
+        ></div>
+
+        <section ref="rightColRef" class="pane right-col">
+          <div class="editor-zone" :style="{ height: split.editorPct + '%' }">
+            <div class="card editor-card">
+              <div class="editor-head">
+                <h2>{{ i18n.t('problem_editor') }}</h2>
+                <select
+                  v-model="lang"
+                  class="select"
+                  :disabled="switchingLang"
+                  data-testid="editor-lang-select"
+                >
+                  <option v-for="item in languages" :key="item.value" :value="item.value">
+                    {{ item.label }}
+                    <template v-if="!problem.languages_available.includes(item.value)"> ·</template>
+                  </option>
+                </select>
+              </div>
+              <div class="editor-body">
+                <CodeEditor v-model="code" :lang="lang" />
+              </div>
+              <div class="actions-row">
+                <label class="use-local">
+                  <input v-model="useLocalCases" type="checkbox" data-testid="use-local-cases" />
+                  <span>{{ i18n.t('use_local_cases') }}</span>
+                </label>
+                <span class="spacer"></span>
+                <button
+                  class="btn btn-ghost"
+                  type="button"
+                  :disabled="inflightRun"
+                  data-testid="run-btn"
+                  @click="runCode"
+                >
+                  {{ i18n.t('run') }}
+                </button>
+                <button
+                  class="btn btn-primary"
+                  type="button"
+                  :disabled="inflightSubmit"
+                  data-testid="submit-btn"
+                  @click="submitCode"
+                >
+                  {{ i18n.t('submit') }}
+                </button>
+              </div>
             </div>
           </div>
 
-          <details class="card cases-card" :open="casesOpen" @toggle="casesOpen = $event.target.open">
-            <summary>{{ i18n.t('custom_cases') }}</summary>
-            <p class="hint-text">{{ i18n.t('custom_cases_hint') }}</p>
-            <textarea
-              v-model="casesDraft"
-              class="input cases-input mono"
-              rows="5"
-              spellcheck="false"
-              data-testid="cases-input"
-            ></textarea>
-            <div class="actions-row">
-              <button
-                class="btn btn-primary"
-                type="button"
-                :disabled="casesSaving"
-                @click="saveCases"
-              >
-                {{ i18n.t('save_cases') }}
-              </button>
-              <span v-if="casesSavedAt" class="saved-hint">{{ i18n.t('cases_saved') }} · {{ casesSavedAt }}</span>
-            </div>
-          </details>
-        </div>
+          <div
+            class="divider divider-h"
+            data-testid="divider-editor"
+            @mousedown="startDrag('y')"
+          ></div>
+
+          <div class="cases-zone">
+            <details class="card cases-card" :open="casesOpen" @toggle="casesOpen = $event.target.open">
+              <summary>{{ i18n.t('custom_cases') }}</summary>
+              <p class="hint-text">{{ i18n.t('custom_cases_hint') }}</p>
+              <textarea
+                v-model="casesDraft"
+                class="input cases-input mono"
+                rows="5"
+                spellcheck="false"
+                data-testid="cases-input"
+              ></textarea>
+              <div class="actions-row">
+                <button
+                  class="btn btn-primary"
+                  type="button"
+                  :disabled="casesSaving"
+                  @click="saveCases"
+                >
+                  {{ i18n.t('save_cases') }}
+                </button>
+                <span v-if="casesSavedAt" class="saved-hint">{{ i18n.t('cases_saved') }} · {{ casesSavedAt }}</span>
+              </div>
+            </details>
+          </div>
+        </section>
       </div>
 
       <JudgeResultPanel
@@ -370,6 +454,10 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.page-wide {
+  max-width: none;
+}
+
 .banner-warn,
 .banner-accent {
   align-items: center;
@@ -391,27 +479,84 @@ onBeforeUnmount(() => {
   gap: var(--space-2);
 }
 
+.chip-link:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 .slug-code {
   color: var(--gray-neutral);
   font-size: var(--font-size-caption);
 }
 
-.panes {
-  display: grid;
-  gap: var(--space-4);
-  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+.wb {
+  display: flex;
+  gap: 0;
+  min-height: calc(100vh - 220px);
 }
 
-.left-col,
-.right-col {
+.pane {
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
   min-width: 0;
+  min-height: 0;
+}
+
+.left-pane {
+  padding-right: var(--space-3);
+}
+
+.right-col {
+  flex: 1;
+  padding-left: var(--space-3);
+}
+
+.divider {
+  background: transparent;
+  border-radius: var(--radius-pill);
+  flex-shrink: 0;
+  position: relative;
+  transition: background-color 0.15s ease;
+  z-index: 5;
+}
+
+.divider-v {
+  border-left: 1px solid var(--border-subtle);
+  cursor: col-resize;
+  margin: 0 calc(var(--space-2) * -1);
+  width: calc(var(--space-2) * 2);
+}
+
+.divider-h {
+  border-top: 1px solid var(--border-subtle);
+  cursor: row-resize;
+  margin: calc(var(--space-2) * -1) 0;
+  height: calc(var(--space-2) * 2);
+}
+
+.divider:hover,
+.divider:active {
+  background: var(--accent);
+}
+
+.pane-card,
+.hints-card,
+.editor-card,
+.cases-card {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.statement {
+  overflow-y: auto;
+  text-align: left;
 }
 
 .statement :deep(p) {
   margin: var(--space-3) 0;
+  text-align: left;
 }
 
 .statement :deep(pre) {
@@ -440,11 +585,26 @@ onBeforeUnmount(() => {
   padding-left: var(--space-6);
 }
 
+.editor-zone {
+  display: flex;
+  flex-direction: column;
+  min-height: 180px;
+}
+
+.editor-card {
+  flex: 1;
+}
+
+.editor-body {
+  flex: 1;
+  min-height: 120px;
+}
+
 .editor-head {
   align-items: center;
   display: flex;
   justify-content: space-between;
-  margin-bottom: var(--space-4);
+  margin-bottom: var(--space-3);
 }
 
 .editor-head h2 {
@@ -456,7 +616,7 @@ onBeforeUnmount(() => {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-3);
-  margin-top: var(--space-4);
+  margin-top: var(--space-3);
 }
 
 .spacer {
@@ -473,6 +633,12 @@ onBeforeUnmount(() => {
 
 .btn-sm {
   padding: var(--space-1) var(--space-4);
+}
+
+.cases-zone {
+  display: flex;
+  flex-direction: column;
+  min-height: 140px;
 }
 
 .cases-card summary {
@@ -493,11 +659,5 @@ onBeforeUnmount(() => {
 .saved-hint {
   color: var(--accent);
   font-size: var(--font-size-caption);
-}
-
-@media (max-width: 960px) {
-  .panes {
-    grid-template-columns: 1fr;
-  }
 }
 </style>

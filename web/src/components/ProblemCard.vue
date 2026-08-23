@@ -34,6 +34,16 @@ const title = computed(() => props.row.title_cn || props.row.title_en || props.r
       </span>
     </span>
     <span class="pright">
+      <span
+        v-if="row.practice_status === 'accepted'"
+        class="chip chip-ok"
+        data-testid="status-solved"
+      >
+        ✓ {{ i18n.t('status_solved') }}
+      </span>
+      <span v-else-if="row.practice_status" class="chip" data-testid="status-attempted">
+        {{ i18n.t('status_attempted') }}
+      </span>
       <span v-if="difficultyLabel" class="chip">{{ difficultyLabel }}</span>
       <span
         v-if="row.paid_only"
