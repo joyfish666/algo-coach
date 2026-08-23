@@ -1,26 +1,118 @@
 """Single entry point of AlgoCoach.
 
-Binds to 127.0.0.1 only (default port 8000, auto-incremented when occupied),
-starts uvicorn in a single process (rate-limit accounting and sync progress
-live in memory; multiple workers would split state), and opens the browser
-once the server is ready.
+Binds to 127.0.0.1 only (default port 8000), runs uvicorn in a single process
+(rate-limit accounting and sync progress live in memory; multiple workers
+would split state), and opens the browser once the server is ready.
+
+Single-instance guard (closes the port-shift blind spot):
+- ~/.algocoach/instance.lock is created with O_CREAT|O_EXCL so two concurrent
+  launches cannot both claim it; it records pid + final port
+- when the lock exists, a live recorded pid refuses startup while a dead one
+  is taken over automatically (crash leftovers)
+- before shifting away from an occupied preferred port, /api/status is probed:
+  an answering coach instance refuses startup, any other occupant just shifts
 """
 
+from __future__ import annotations
+
 import argparse
+import ctypes
+import json
+import os
 import socket
 import sys
 import threading
 import time
+import urllib.request
 import webbrowser
 
 import uvicorn
-from rich.panel import Panel
 from rich.console import Console
+from rich.panel import Panel
 
 import lc
+from lc.config import app_dir
+
+LOCK_FILE_NAME = "instance.lock"
+STILL_ACTIVE = 259
 
 
-def find_free_port(start, host="127.0.0.1"):
+def lock_path():
+    return app_dir() / LOCK_FILE_NAME
+
+
+def _pid_alive(pid: int) -> bool:
+    if not isinstance(pid, int) or pid <= 0:
+        return False
+    if sys.platform == "win32":
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        if not handle:
+            return False
+        exit_code = ctypes.c_ulong()
+        ok = kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code))
+        kernel32.CloseHandle(handle)
+        return bool(ok) and exit_code.value == STILL_ACTIVE
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+def acquire_instance_lock(port: int):
+    """Atomically create the instance lock for the given port.
+
+    Returns (True, "") on success, or (False, refusal message) when another
+    live instance owns the lock. Stale locks from dead processes are removed
+    and creation retried.
+    """
+    path = lock_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = json.dumps({"pid": os.getpid(), "port": port}).encode("utf-8")
+    while True:
+        try:
+            fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            try:
+                info = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                info = {}
+            if _pid_alive(info.get("pid")):
+                return False, info
+            try:
+                path.unlink()
+            except OSError:
+                pass
+            continue
+        try:
+            os.write(fd, payload)
+        finally:
+            os.close(fd)
+        return True, ""
+
+
+def release_instance_lock() -> None:
+    try:
+        lock_path().unlink()
+    except OSError:
+        pass
+
+
+def probe_is_coach(host: str, port: int) -> bool:
+    """True when something at host:port answers like our /api/status."""
+    try:
+        with urllib.request.urlopen(
+            f"http://{host}:{port}/api/status", timeout=1.5
+        ) as response:
+            body = json.loads(response.read() or b"{}")
+            return body.get("app") == "algocoach"
+    except Exception:
+        return False
+
+
+def find_free_port(start: int, host: str = "127.0.0.1"):
     for port in range(start, start + 100):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
             try:
@@ -70,9 +162,23 @@ def main(argv=None):
     args = parser.parse_args(argv)
 
     host = "127.0.0.1"
-    port = find_free_port(args.port)
-    url = f"http://{host}:{port}"
 
+    if probe_is_coach(host, args.port):
+        print(f"[coach] another AlgoCoach instance already answers at http://{host}:{args.port}")
+        print("[coach] refusing to start a second one; open that URL in your browser instead.")
+        return 1
+
+    port = find_free_port(args.port, host)
+    owned, existing = acquire_instance_lock(port)
+    if not owned:
+        recorded = existing.get("port", port)
+        print(
+            f"[coach] refusing to start: another AlgoCoach instance "
+            f"(pid {existing.get('pid', '?')}) already runs at http://{host}:{recorded}"
+        )
+        return 1
+
+    url = f"http://{host}:{port}"
     config = uvicorn.Config(
         "server.api:app",
         host=host,
@@ -89,7 +195,10 @@ def main(argv=None):
         ).start()
 
     print_banner(url)
-    server.run()
+    try:
+        server.run()
+    finally:
+        release_instance_lock()
     return 0
 
 

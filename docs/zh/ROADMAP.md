@@ -15,7 +15,9 @@
 | 4 | 答题工作台：ProblemDetail + CodeEditor + Run/Submit + 结果面板 + 自定义用例面板 | ◐ 已实现，待真网实测（two-sum 全流程 + 剑指 Offer slug 路由） |
 | 5 | 题库列表页 + setup 向导 + daily | ✅ 已实现，待真网联调回归 |
 | 6 | archive + llm + analyze + AI 侧边栏 | ✅ 已实现（AI 报告/ask 需真实 LLM Key 联调回归） |
-| 7 | 文档全套 + 测试补齐 + 打磨（含安装态 dist 定位验收） | ⬜ 待实施 |
+| 7 | 文档全套 + 测试补齐 + 打磨（含安装态 dist 定位验收） | ✅ 已完成（安装态验收通过：非可编辑 pip 安装下 coach 直接打开前端） |
+
+**v0.1.0 功能面全部交付。** 真网回归清单（需真实 Cookie / LLM Key，随用随验）：two-sum Run/Submit 全流程、剑指 Offer slug 路由、题库全量同步字段校验、站内导入、AI 报告与 ask 上下文问答。
 
 ## v0.x
 

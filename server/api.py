@@ -15,10 +15,13 @@ Layer rules:
 from __future__ import annotations
 
 import json
+import os
 import threading
+from datetime import datetime, timezone
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 from urllib.parse import urlparse
 
@@ -50,6 +53,33 @@ app = FastAPI(title="AlgoCoach", version=lc.__version__)
 _sync_engine = problems.SyncEngine()
 _archive_lock = threading.Lock()
 _archive: Archive | None = None
+
+
+def find_dist_dir() -> Path | None:
+    """Locate the built frontend (web/dist).
+
+    Resolution chain: ALGOCOACH_DIST env override -> repository layout
+    (editable installs / source checkout, searched upward from this file) ->
+    packaged copy inside the installed server package. None means API-only
+    mode; the dev flow serves the UI through Vite instead.
+    """
+    env = os.environ.get("ALGOCOACH_DIST")
+    if env and (Path(env) / "index.html").is_file():
+        return Path(env)
+
+    here = Path(__file__).resolve().parent
+    for base in [here.parent, *here.parents[:4]]:
+        candidate = base / "web" / "dist" / "index.html"
+        if candidate.is_file():
+            return candidate.parent
+
+    packaged = here / "webdist"
+    if (packaged / "index.html").is_file():
+        return packaged
+    return None
+
+
+DIST_DIR = find_dist_dir()
 
 
 def get_archive() -> Archive:
@@ -149,22 +179,6 @@ async def domain_error_handler(request: Request, exc: AlgoCoachError):
 
 # ---------------------------------------------------------------------------
 # status / setup / settings
-
-
-@app.get("/")
-def index():
-    return {
-        "app": f"AlgoCoach v{lc.__version__}",
-        "hint": "browser is opening; useful endpoints below",
-        "endpoints": [
-            "/api/status",
-            "/api/settings",
-            "/api/problems",
-            "/api/problems/sync/progress",
-            "/api/daily",
-            "/api/problem/two-sum",
-        ],
-    }
 
 
 @app.get("/api/status")
@@ -696,8 +710,6 @@ def import_site(payload: ImportSitePayload):
             problem_row=row,
         )
         if item.get("timestamp", "").isdigit():
-            from datetime import datetime, timezone
-
             record["timestamp"] = datetime.fromtimestamp(
                 int(item["timestamp"]), tz=timezone.utc
             ).isoformat(timespec="seconds")
@@ -707,3 +719,39 @@ def import_site(payload: ImportSitePayload):
     result = {"imported": imported, "skipped": skipped}
     logger.info("site import: %s", result)
     return result
+
+
+# ---------------------------------------------------------------------------
+# built-frontend hosting + SPA fallback (registered last on purpose)
+
+
+@app.get("/{full_path:path}", include_in_schema=False)
+def spa_fallback(full_path: str):
+    if full_path == "api" or full_path.startswith("api/"):
+        raise HTTPException(status_code=404, detail=t("problem_not_found"))
+
+    if DIST_DIR is not None:
+        dist_root = DIST_DIR.resolve()
+        requested = (dist_root / full_path.lstrip("/")).resolve() if full_path else None
+        if requested is not None and requested.is_file():
+            if str(requested).startswith(str(dist_root)):
+                return FileResponse(requested)
+        index = dist_root / "index.html"
+        if index.is_file():
+            return FileResponse(index)
+
+    if not full_path:
+        return JSONResponse(
+            {
+                "app": f"AlgoCoach v{lc.__version__}",
+                "hint": "frontend not built; run `cd web && npm run build` or use Vite dev mode",
+                "endpoints": [
+                    "/api/status",
+                    "/api/settings",
+                    "/api/problems",
+                    "/api/problems/sync/progress",
+                    "/api/daily",
+                ],
+            }
+        )
+    raise HTTPException(status_code=404, detail="not found")

@@ -47,6 +47,9 @@ coach = "cli:main"
 packages = ["lc", "lc.sites", "server"]
 py-modules = ["cli"]
 
+[tool.setuptools.package-data]
+server = ["webdist/**/*"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [

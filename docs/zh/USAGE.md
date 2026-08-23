@@ -4,7 +4,7 @@
 
 ## 安装
 
-要求 Python ≥ 3.10（Node.js 仅从源码构建前端时需要）：
+要求 Python ≥ 3.10（Node.js ≥ 18 仅在从源码构建前端时需要）：
 
 ```bash
 git clone https://github.com/joyfish666/algo-coach.git
@@ -13,7 +13,7 @@ pip install -e .
 cd web && npm install && npm run build && cd ..
 ```
 
-发布版 wheel 将附带已构建前端，届时无需 Node。
+构建完成后 `coach` 直接托管前端页面，日常使用不再需要 Node。
 
 ## 启动
 
@@ -22,6 +22,7 @@ coach
 ```
 
 - 服务仅绑定 `127.0.0.1`，默认端口 8000，被占用自动顺延。
+- **单实例守卫**：已有 coach 实例运行时拒绝重复启动并提示地址；崩溃残留的锁文件自动接管。
 - 横幅显示最终实际 URL；服务就绪后自动打开浏览器。
 - 首次启动进入 `/setup` 引导页。
 - 参数：`--port`（首选端口）、`--no-browser`（不自动开浏览器）、`--debug`（详细日志）。
@@ -31,7 +32,7 @@ coach
 ## /setup 向导
 
 分步配置：粘贴 Cookie（后端即时校验有效性）→ LLM Key/URL（可跳过）→ 刷题语言与主题选择。
-Cookie 失效后可在设置页更新，或清除后重走向导。
+Cookie 失效后任意页面会弹出底部横幅引导重新配置，也可在设置页点击「更新 Cookie」。
 
 ## 页面说明
 

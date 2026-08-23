@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Packaging polish and release readiness (stage 7): the built frontend is now served directly by
+  `coach` through a dist resolution chain (ALGOCOACH_DIST override → repository web/dist →
+  packaged server/webdist copy shipped via package-data) with an SPA catch-all fallback to
+  index.html, traversal protection and an API-only JSON hint mode when no build exists; a
+  single-instance guard built on an O_CREAT|O_EXCL instance lock recording pid and port, PID
+  liveness probing (ctypes OpenProcess on Windows, avoiding os.kill signal semantics), stale-lock
+  takeover, plus an /api/status probe before port shifting so a running coach refuses duplicates
+  instead of silently starting beside it; verified end-to-end from a non-editable pip install.
 - Archive, LLM and analytics layer (stage 6): an append-only JSON Lines submission archive whose
   records embed difficulty/tags/lang plus full verdict fields so one line powers analytics and AI
   reports; a lock-guarded qid→latest-verdict index with startup reload and torn-line tolerance;

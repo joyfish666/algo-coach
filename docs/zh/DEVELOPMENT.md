@@ -45,4 +45,30 @@ cd web && npm run dev   # Vite，localhost:5173，/api 代理到 8000
 
 ## 发布流程
 
-待 v1.x 补充（构建 wheel、附带前端产物、PyPI 发布）。
+构建可分发的包（wheel 内附带已构建前端）：
+
+```bash
+cd web && npm run build && cd ..
+rm -rf server/webdist && mkdir -p server/webdist
+cp -r web/dist/. server/webdist/
+python -m build
+```
+
+`server/webdist/` 为构建产物（已 gitignore），打包时经 package-data 进入 wheel；
+运行期 dist 解析链：`ALGOCOACH_DIST` 环境变量 → 仓库 `web/dist` → 安装目录内
+`server/webdist`，均未命中则进入 API-only 模式。
+
+验收命令（模拟用户安装态）：
+
+```bash
+python -m venv /tmp/ac-check && /tmp/ac-check/Scripts/pip install .
+cd /tmp && /tmp/ac-check/Scripts/coach --no-browser
+curl http://127.0.0.1:8000/          # 应返回前端 index.html
+curl http://127.0.0.1:8000/settings  # SPA 深链应同样返回页面
+```
+
+## 单实例守卫
+
+`coach` 通过 `~/.algocoach/instance.lock`（O_CREAT|O_EXCL 原子创建，记录 PID+端口）
+保证全局单实例：存活实例拒绝重复启动并打印其地址；崩溃残留锁自动接管；
+首选端口被占用时先探测 `/api/status`——是 coach 则拒启，是其他程序才顺延端口。

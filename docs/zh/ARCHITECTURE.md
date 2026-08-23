@@ -43,25 +43,36 @@ submission_id 三条写入路径全覆盖（判题完成 / 超时 unknown 归档
 `{qid}` = slug 规范键。
 
 ```
-GET  /api/status                    配置状态/版本/站点信息
+GET  /api/status                    配置状态/版本/站点信息/同步进度快照
 POST /api/setup/validate-cookie     引导页即时校验
 GET  /api/settings                  读取（敏感字段脱敏）
-PUT  /api/settings                  更新
+PUT  /api/settings                  更新（Cookie 变更即时重建会话）
 GET  /api/problems                  全量返回本地缓存（筛选分页由前端执行）
 POST /api/problems/sync             同步题库（进行中重复调用返回 409）
 GET  /api/problems/sync/progress    同步进度轮询
 GET  /api/daily                     每日一题
 GET  /api/problem/{qid}             题目详情；?refresh=1 显式重抓（用户编辑过的文件先 .bak 备份）
 GET  /api/problem/{qid}/template    ?lang=cpp 按需抓取该语言模板并落盘
+PUT  /api/problem/{qid}/solution    编辑器代码落盘（debounce 自动保存/保存即判定共用）
 PUT  /api/problem/{qid}/testcases   自定义用例面板保存
-POST /api/judge/run                 {qid, lang, code, use_local?} 先落盘再判定
+POST /api/judge/run                 {qid, lang, code, use_local?} 先落盘再判定，不进提交历史
 POST /api/judge/submit              {qid, lang, code} 阻塞长轮询至判定完成或超时；
-                                    响应体 = 最终判定结果 + submission_id；超时走「结果未知」路径
+                                    完成后自动归档；超时走「结果未知」路径并归档
 GET  /api/archive/recent            本地归档最近记录
 POST /api/archive/import-site       recentSubmissionList 导入（≤20 条边界，去重键 = submission_id）
-POST /api/ask                       无状态问答 {question, history?, context:{qid, last_verdict}}
-POST /api/analyze                   标签统计 + AI 报告
+POST /api/ask                       无状态问答 {question, history?, qid}——题目与最近判定自动入上下文
+POST /api/analyze                   解题统计 + 标签掌握度 + 推荐 + AI 报告（use_llm 可关）
+
+GET  /{path}                        前端托管：命中 dist 文件直出，SPA 深链回退 index.html；
+                                    未构建 dist 时为 API-only 模式
 ```
+
+## 前端托管与单实例
+
+- **dist 解析链**：`ALGOCOACH_DIST` 环境变量 → 仓库 `web/dist`（源码/可编辑安装）→
+  安装包内 `server/webdist`（wheel 发布态）；均未命中则 API-only。
+- **单实例守卫**：`~/.algocoach/instance.lock`（O_CREAT|O_EXCL 记 PID+端口）+
+  PID 存活探测（Windows 走 ctypes OpenProcess）+ 端口占用时 `/api/status` 兜底识别。
 
 ## 已知能力边界
 

@@ -6,14 +6,17 @@ All data — cookies, configs, submission archives — stays on your machine. No
 > **Status**: pre-release skeleton under active development towards v0.1.0. See the
 > [ROADMAP](docs/zh/ROADMAP.md) for the delivery plan.
 
-## Features (planned for v0.1.0)
+## Features
 
 - Guided `/setup` wizard: paste your cookie, validate it instantly, optionally configure an LLM key
 - Full problem-list sync with local caching and progress feedback
 - Answering workbench: rendered statement, CodeMirror 6 editor, Run / Submit with rich verdicts
   (runtime/memory percentiles, WA case diff, CE/RE details)
 - Offline review: opened problems are materialized to local files you own
-- Daily problem shortcut; analytics dashboard with AI weakness reports (bring your own key)
+- Daily problem shortcut; analytics dashboard with tag-mastery chart, recommendations and an AI
+  weakness report (bring your own key)
+- Stateless AI coach sidebar on every problem, aware of your latest verdict
+- Local submission archive (JSON Lines) with site-side import; accepted status derived per problem
 - Bilingual UI (zh/en) and a minimalist light/dark design system
 
 ## Installation
@@ -35,8 +38,11 @@ coach
 ```
 
 The server binds to `127.0.0.1` only (default port `8000`, auto-incremented when occupied),
-prints the final URL in a banner, and opens your browser as soon as it is ready.
+prints the final URL in a banner, and opens your browser as soon as it is ready — the built
+frontend is served straight from the package, no Node needed at runtime.
 First launch guides you through `/setup`.
+
+A single-instance guard refuses duplicate launches and points you at the running URL.
 
 Options: `--port`, `--no-browser`, `--debug`.
 
