@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Frontend skeleton (stage 3): a zh/en i18n store with browser-locale detection and localStorage
+  persistence, a backend status store consumed by the route guard (unconfigured visitors land on
+  the setup page; an unreachable backend degrades gracefully), a redesigned sidebar with
+  hand-written thin-line SVG icons, an icon-based theme switcher plus language switcher, shared
+  design-system primitives (cards, pill buttons, inputs, chips, empty states) built on the dual
+  theme tokens, restyled skeleton views including analytics stat cards and a two-pane workbench
+  preview with the CodeMirror editor, and vitest/jsdom unit coverage for theme persistence and
+  i18n behavior.
 - Problem data layer and REST surface (stage 2): a thread-safe sync engine paging the full
   problem list into problems.json with atomic writes, in-process resume after a failed page,
   slug/frontendQuestionId duplicate skipping without aborting, and unsupported-category marking;

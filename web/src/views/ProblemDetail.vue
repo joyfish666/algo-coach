@@ -2,36 +2,65 @@
 import { ref } from 'vue'
 
 import CodeEditor from '../components/CodeEditor.vue'
+import PageHeader from '../components/PageHeader.vue'
+import { useI18nStore } from '../stores/i18n'
 
-defineProps({ qid: { type: String, required: true } })
+const props = defineProps({ qid: { type: String, required: true } })
 
+const i18n = useI18nStore()
 const code = ref('')
 const lang = ref('cpp')
-const languages = ['cpp', 'python3', 'java']
+const languages = [
+  { value: 'cpp', label: 'C++' },
+  { value: 'python3', label: 'Python 3' },
+  { value: 'java', label: 'Java' },
+]
 </script>
 
 <template>
   <section class="page">
-    <h1>{{ qid }}</h1>
-    <p class="placeholder">答题工作台骨架占位：题面渲染、Run/Submit、结果面板与自定义用例面板将在后续里程碑实现。</p>
-    <div class="editor-demo">
-      <select v-model="lang">
-        <option v-for="item in languages" :key="item" :value="item">{{ item }}</option>
-      </select>
-      <CodeEditor v-model="code" :lang="lang" />
+    <PageHeader :title="props.qid" :subtitle="i18n.t('coming_soon')" />
+    <div class="panes">
+      <div class="card pane-statement">
+        <h2>{{ i18n.t('problem_statement') }}</h2>
+        <p class="placeholder">{{ i18n.t('coming_soon') }}</p>
+      </div>
+      <div class="card pane-editor">
+        <div class="editor-head">
+          <h2>{{ i18n.t('problem_editor') }}</h2>
+          <select v-model="lang" class="select" data-testid="editor-lang-select">
+            <option v-for="item in languages" :key="item.value" :value="item.value">
+              {{ item.label }}
+            </option>
+          </select>
+        </div>
+        <CodeEditor v-model="code" :lang="lang" />
+      </div>
     </div>
   </section>
 </template>
 
 <style scoped>
-.editor-demo {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
+.panes {
+  display: grid;
+  gap: var(--space-4);
+  grid-template-columns: 1fr 1fr;
 }
 
-select {
-  width: fit-content;
-  padding: var(--space-1) var(--space-2);
+.editor-head {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: var(--space-4);
+}
+
+.editor-head h2 {
+  margin-bottom: 0;
+}
+
+@media (max-width: 960px) {
+  .panes {
+    grid-template-columns: 1fr;
+  }
 }
 </style>
