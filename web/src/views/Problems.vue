@@ -1,19 +1,25 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { computed, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 
 import PageHeader from '../components/PageHeader.vue'
 import ProblemCard from '../components/ProblemCard.vue'
 import { api } from '../api'
 import { useI18nStore } from '../stores/i18n'
 import { useStatusStore } from '../stores/status'
-import { collectTags, filterProblems, paginate, sortByMode } from '../utils/problems'
+import { useSyncStore } from '../stores/sync'
+import { useToastStore } from '../stores/toast'
+import { collectTags, filterProblems, paginate, pickRandom, sortByMode } from '../utils/problems'
 
 const PAGE_SIZE = 50
+const DENSITY_KEY = 'algocoach-density'
 
 const i18n = useI18nStore()
 const status = useStatusStore()
+const sync = useSyncStore()
+const toast = useToastStore()
 const route = useRoute()
+const router = useRouter()
 
 const problems = ref([])
 const syncedAt = ref(null)
@@ -23,18 +29,27 @@ const listError = ref('')
 const keyword = ref('')
 const difficulty = ref('')
 const tagSlug = ref('')
+const statusFilter = ref('')
 const sortMode = ref('id')
+const dense = ref(readDensity())
 
 const page = ref(1)
 
-const syncing = ref(false)
-const syncFetched = ref(0)
-const syncTotal = ref(null)
-const syncMessage = ref('')
-const syncErrorText = ref('')
-let pollTimer = null
-let pollFailures = 0
-const POLL_MAX_FAILURES = 5
+function readDensity() {
+  try {
+    return localStorage.getItem(DENSITY_KEY) === 'dense'
+  } catch {
+    return false
+  }
+}
+
+function toggleDensity() {
+  dense.value = !dense.value
+  try {
+    localStorage.setItem(DENSITY_KEY, dense.value ? 'dense' : 'cozy')
+  } catch {
+  }
+}
 
 const tagOptions = computed(() => collectTags(problems.value))
 
@@ -43,6 +58,7 @@ const filtered = computed(() =>
     keyword: keyword.value,
     difficulty: difficulty.value,
     tagSlug: tagSlug.value,
+    status: statusFilter.value,
   })
 )
 
@@ -60,7 +76,7 @@ function applyRouteQuery() {
 watch(() => route.fullPath, applyRouteQuery, { immediate: true })
 
 // any filter/sort change restarts pagination
-watch([keyword, difficulty, tagSlug, sortMode], () => (page.value = 1))
+watch([keyword, difficulty, tagSlug, statusFilter, sortMode], () => (page.value = 1))
 
 async function loadProblems() {
   loadingList.value = true
@@ -76,69 +92,43 @@ async function loadProblems() {
   }
 }
 
-function syncLabel() {
-  if (!syncing.value) return i18n.t('sync_now')
-  const total = syncTotal.value
-  if (!total) return i18n.t('sync_running', { fetched: syncFetched.value, total: '?' })
-  return i18n.t('sync_running', { fetched: syncFetched.value, total })
-}
-
-async function startSync() {
-  if (syncing.value) return
-  syncErrorText.value = ''
-  syncMessage.value = ''
-  syncing.value = true
-  syncFetched.value = 0
-  syncTotal.value = null
-  try {
-    try {
-      await api.startSync()
-    } catch (err) {
-      if (err.status !== 409) throw err
-    }
-    pollTimer = setInterval(pollSyncProgress, 1000)
-    await pollSyncProgress()
-  } catch (err) {
-    syncing.value = false
-    clearInterval(pollTimer)
-    syncErrorText.value = err.message || String(err)
-  }
-}
-
-async function pollSyncProgress() {
-  try {
-    const progress = await api.getSyncProgress()
-    pollFailures = 0
-    syncFetched.value = progress.fetched || 0
-    syncTotal.value = progress.total ?? null
-    if (!progress.running) {
-      clearInterval(pollTimer)
-      pollTimer = null
-      syncing.value = false
-      if (progress.error) {
-        syncErrorText.value = `${i18n.t('sync_error')}: ${progress.error}`
-      } else {
-        syncMessage.value = i18n.t('sync_done')
-        setTimeout(() => (syncMessage.value = ''), 4000)
-      }
-      await loadProblems()
+// the backend finished a run this view is interested in -> refresh the cache
+// view; done/failed announcements themselves come from the toast channel
+watch(
+  () => sync.phase,
+  (phase, prev) => {
+    if ((phase === 'done' || phase === 'failed') && prev === 'running') {
+      loadProblems()
       status.refresh()
     }
-  } catch {
-    // bounded retry budget: without it a persistently failing endpoint keeps
-    // the UI in "syncing" forever (e.g. backend restarted mid-sync)
-    pollFailures += 1
-    if (pollFailures >= POLL_MAX_FAILURES) {
-      clearInterval(pollTimer)
-      pollTimer = null
-      syncing.value = false
-      syncErrorText.value = i18n.t('sync_lost')
-    }
+  }
+)
+
+function goRandom() {
+  const row = pickRandom(filtered.value)
+  if (row) router.push(`/problem/${row.slug}`)
+}
+
+async function onToggleFavorite({ slug, next }) {
+  // optimistic update; the row object is shared with the card via props
+  const row = problems.value.find((item) => item.slug === slug)
+  if (!row) return
+  const previous = row.favorite
+  row.favorite = next
+  try {
+    await api.putFavorite(slug, next)
+  } catch (err) {
+    row.favorite = previous
+    toast.error({ text: err.message || String(err) })
   }
 }
 
-onMounted(loadProblems)
-onBeforeUnmount(() => clearInterval(pollTimer))
+onMounted(() => {
+  // adopt an in-flight backend sync (page reload / first visit mid-sync);
+  // no-op when idle. status was already refreshed by the router guard.
+  sync.adoptFromStatus(status.sync)
+  loadProblems()
+})
 </script>
 
 <template>
@@ -149,18 +139,16 @@ onBeforeUnmount(() => clearInterval(pollTimer))
           <button
             class="btn btn-primary"
             type="button"
-            :disabled="syncing || !status.reachable"
+            :disabled="sync.running || !status.reachable"
             data-testid="sync-btn"
-            @click="startSync"
+            @click="sync.start()"
           >
-            {{ syncLabel() }}
+            {{ sync.label }}
           </button>
-          <span v-if="syncing" class="sync-note">{{ i18n.t('sync_eta') }}</span>
-          <span v-else-if="syncMessage" class="sync-done" data-testid="sync-done">{{ syncMessage }}</span>
+          <span v-if="sync.running" class="sync-note">{{ i18n.t('sync_eta') }}</span>
           <span v-else-if="syncedAt" class="last-synced">
             {{ i18n.t('last_synced') }}: {{ new Date(syncedAt).toLocaleString() }}
           </span>
-          <span v-else-if="syncErrorText" class="sync-error">{{ syncErrorText }}</span>
         </div>
       </template>
     </PageHeader>
@@ -173,6 +161,13 @@ onBeforeUnmount(() => clearInterval(pollTimer))
         :placeholder="i18n.t('problems_search_placeholder')"
         data-testid="search-input"
       />
+      <select v-model="statusFilter" class="select" data-testid="status-select">
+        <option value="">{{ i18n.t('status_filter_all') }}</option>
+        <option value="solved">{{ i18n.t('status_solved') }}</option>
+        <option value="attempted">{{ i18n.t('status_attempted') }}</option>
+        <option value="todo">{{ i18n.t('status_todo') }}</option>
+        <option value="favorite">{{ i18n.t('filter_favorite') }}</option>
+      </select>
       <select v-model="difficulty" class="select" data-testid="difficulty-select">
         <option value="">{{ i18n.t('diff_all') }}</option>
         <option value="easy">{{ i18n.t('diff_easy') }}</option>
@@ -189,9 +184,28 @@ onBeforeUnmount(() => clearInterval(pollTimer))
         <option value="id">{{ i18n.t('sort_id') }}</option>
         <option value="recent">{{ i18n.t('sort_recent') }}</option>
       </select>
+      <button
+        class="btn btn-ghost"
+        type="button"
+        :disabled="!filtered.length"
+        data-testid="random-btn"
+        @click="goRandom"
+      >
+        🎲 {{ i18n.t('action_random') }}
+      </button>
+      <button
+        class="btn btn-ghost"
+        type="button"
+        data-testid="density-btn"
+        @click="toggleDensity"
+      >
+        {{ dense ? i18n.t('density_cozy') : i18n.t('density_compact') }}
+      </button>
     </div>
 
-    <div v-if="loadingList" class="card empty-state">{{ i18n.t('loading_problem') }}</div>
+    <div v-if="loadingList" class="problem-list" data-testid="skeleton-list">
+      <div v-for="index in 8" :key="index" class="skeleton skeleton-row"></div>
+    </div>
 
     <div v-else-if="listError" class="card empty-state">
       <p>{{ listError }}</p>
@@ -206,14 +220,19 @@ onBeforeUnmount(() => clearInterval(pollTimer))
       </svg>
       <p class="empty-title">{{ i18n.t('empty_title') }}</p>
       <p>{{ i18n.t('empty_body') }}</p>
-      <button class="btn btn-primary" type="button" :disabled="syncing" @click="startSync">
+      <button class="btn btn-primary" type="button" :disabled="sync.running" @click="sync.start()">
         {{ i18n.t('sync_now') }}
       </button>
     </div>
 
     <template v-else>
-      <div class="problem-list" data-testid="problem-list">
-        <ProblemCard v-for="row in paged.rows" :key="row.slug" :row="row" />
+      <div class="problem-list" :class="{ dense }" data-testid="problem-list">
+        <ProblemCard
+          v-for="row in paged.rows"
+          :key="row.slug"
+          :row="row"
+          @toggle-favorite="onToggleFavorite"
+        />
         <p v-if="!paged.rows.length" class="card empty-state no-match" data-testid="no-match">
           {{ i18n.t('no_match') }}
         </p>
@@ -269,16 +288,6 @@ onBeforeUnmount(() => clearInterval(pollTimer))
   font-size: var(--font-size-caption);
 }
 
-.sync-done {
-  color: var(--accent);
-  font-size: var(--font-size-caption);
-}
-
-.sync-error {
-  color: var(--text-primary);
-  font-size: var(--font-size-caption);
-}
-
 .toolbar {
   display: flex;
   flex-wrap: wrap;
@@ -296,6 +305,24 @@ onBeforeUnmount(() => clearInterval(pollTimer))
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
+}
+
+.skeleton-row {
+  height: 52px;
+}
+
+/* compact reading mode: trade breathing room for scan density */
+.dense {
+  gap: var(--space-1);
+}
+
+.dense :deep(.pcard) {
+  padding: var(--space-1) var(--space-3);
+}
+
+.dense :deep(.ptags),
+.dense :deep(.pstatus) {
+  display: none;
 }
 
 .no-match {

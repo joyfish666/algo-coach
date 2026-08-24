@@ -6,6 +6,9 @@ import { useI18nStore } from '../stores/i18n'
 
 const props = defineProps({
   qid: { type: String, required: true },
+  // lazy getter for the editor buffer; opt-in per question so a long
+  // solution is not shipped to the LLM on every casual ask
+  getCode: { type: Function, default: null },
 })
 
 const i18n = useI18nStore()
@@ -16,6 +19,7 @@ const open = ref(false)
 const messages = ref([])
 const draft = ref('')
 const pending = ref(false)
+const attachCode = ref(false)
 const listEl = ref(null)
 const panelEl = ref(null)
 
@@ -88,6 +92,7 @@ watch(
     messages.value = []
     pending.value = false
     draft.value = ''
+    attachCode.value = false
   }
 )
 
@@ -118,7 +123,13 @@ async function send() {
       .filter((m) => !m.error)
       .slice(-13, -1)
       .map((m) => ({ role: m.role, content: m.content }))
-    const data = await api.ask({ question, history, qid: askedQid })
+    const data = await api.ask({
+      question,
+      history,
+      qid: askedQid,
+      code: attachCode.value && props.getCode ? props.getCode() : null,
+      lang: null,
+    })
     if (askedQid !== props.qid) return // user switched problems meanwhile
     messages.value.push({ role: 'assistant', content: data.answer })
   } catch (err) {
@@ -158,6 +169,11 @@ function onEnter(event) {
       </button>
     </header>
     <p class="context-hint">{{ i18n.t('ai_context_hint') }}</p>
+
+    <label v-if="getCode" class="attach-row" data-testid="attach-code">
+      <input v-model="attachCode" type="checkbox" />
+      <span>{{ i18n.t('attach_code') }}</span>
+    </label>
 
     <div ref="listEl" class="messages">
       <p v-if="!messages.length && !pending" class="empty">{{ i18n.t('ai_placeholder') }}</p>
@@ -268,6 +284,16 @@ function onEnter(event) {
   color: var(--gray-neutral);
   font-size: var(--font-size-caption);
   margin: var(--space-1) 0 0;
+}
+
+.attach-row {
+  align-items: center;
+  color: var(--gray-neutral);
+  cursor: pointer;
+  display: flex;
+  font-size: var(--font-size-caption);
+  gap: var(--space-2);
+  margin-top: var(--space-2);
 }
 
 .messages {

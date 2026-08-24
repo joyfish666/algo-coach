@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { collectTags, filterProblems, paginate } from './problems'
+import { collectTags, filterProblems, paginate, pickRandom } from './problems'
 
 const rows = [
   {
@@ -13,6 +13,7 @@ const rows = [
       { slug: 'array', name_zh: '数组', name_en: 'Array' },
       { slug: 'hash-table', name_zh: '哈希表', name_en: 'Hash Table' },
     ],
+    practice_status: 'accepted',
   },
   {
     slug: 'shu-zu-zhong-zhong-fu-de-shu-zi-lcof',
@@ -21,6 +22,7 @@ const rows = [
     title_en: 'Shu Zu LCOF',
     difficulty: 'medium',
     tags: [{ slug: 'array', name_zh: '数组', name_en: 'Array' }],
+    practice_status: 'wrong_answer',
   },
   {
     slug: 'add-two-num',
@@ -53,6 +55,34 @@ describe('filterProblems', () => {
     expect(filterProblems(rows, {})).toHaveLength(3)
     expect(filterProblems(rows, { keyword: 'add', difficulty: 'medium' })).toHaveLength(1)
     expect(filterProblems(rows, { keyword: 'add', difficulty: 'easy' })).toHaveLength(0)
+  })
+
+  it('filters by practice status buckets', () => {
+    expect(filterProblems(rows, { status: 'solved' }).map((r) => r.slug)).toEqual(['two-sum'])
+    expect(filterProblems(rows, { status: 'attempted' }).map((r) => r.slug)).toEqual([
+      'shu-zu-zhong-zhong-fu-de-shu-zi-lcof',
+    ])
+    // never-practiced rows only; attempted-but-unsolved is not "todo"
+    expect(filterProblems(rows, { status: 'todo' }).map((r) => r.slug)).toEqual(['add-two-num'])
+    expect(filterProblems(rows, { status: 'favorite' })).toHaveLength(0)
+  })
+
+  it('favorite filter matches only starred rows', () => {
+    const starred = [{ slug: 'a', favorite: true }, { slug: 'b' }]
+    expect(filterProblems(starred, { status: 'favorite' }).map((r) => r.slug)).toEqual(['a'])
+  })
+})
+
+describe('pickRandom', () => {
+  it('returns an element of the list', () => {
+    for (let i = 0; i < 20; i += 1) {
+      expect(rows).toContain(pickRandom(rows))
+    }
+  })
+
+  it('handles empty input', () => {
+    expect(pickRandom([])).toBeNull()
+    expect(pickRandom(null)).toBeNull()
   })
 })
 

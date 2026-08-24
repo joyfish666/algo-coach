@@ -7,6 +7,83 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Feature completion + second review pass (2026-08-24)
+
+Every fix again lists its root cause; symptom patches were not accepted.
+
+**Features**
+
+- Problem list gains practice-status filtering (solved / attempted / not-tried /
+  favorites), per-problem favorites with an index file `~/.algocoach/favorites.json`,
+  a random-pick button scoped to the current filter result, and a compact/cozy
+  density toggle. Root cause of the gap: the archive already derived practice
+  status but the list query never exposed it; favorites need list-level state for
+  all 4400+ rows while workspace directories only exist for opened problems, so
+  state lives in a dedicated index instead of per-directory meta flags.
+- New `/history` view over the local archive (time / problem / lang / verdict /
+  runtime / memory, expandable WA diff and CE/RE detail, filterable by problem).
+  Backend reads converge on one locked scan primitive `Archive.query(slug, limit)`;
+  the old `recent()` now delegates to it so read paths cannot drift.
+- Per-problem notes (`notes.md` in the workspace, debounced autosave, untouched
+  by refresh like solutions).
+- AI coach questions can attach the current editor code explicitly (truncated at
+  6000 chars); opt-in per question so casual asks don't upload long code.
+
+**Bug fixes (root-caused)**
+
+- Sync failures were invisible once a sync had ever succeeded: the header's
+  display cascade ranked the stale "last synced" line above error text, so the
+  error branch never rendered. Errors moved to a dedicated toast channel where
+  failures persist until dismissed; inline spans only carry informational state.
+- A transient save/judge failure tore down the entire workbench UI: fatal load
+  errors and transient action errors shared one `errorText`. Now only load
+  failure replaces the page (`loadError`); action failures toast and keep the
+  editor alive.
+- Leaving the problems page silently dropped the progress UI of an in-flight
+  backend sync, and a backend restart mid-sync was announced as "sync complete":
+  polling was owned by the view, and `progress()` reports `running:false`
+  both for "finished" and "engine never ran". Polling moved into an app-level
+  sync store that survives route changes and re-adopts a running backend sync
+  after reload; genuine completion now requires `started_at`/`finished_at`.
+- Every fetch now carries an abort deadline (default 45s; LLM/submit 150s;
+  run 90s; import 120s) - previously a hung backend froze the calling view
+  forever. Degrades to no-timeout when `AbortSignal.timeout` is unavailable.
+
+**UI**
+
+- Semantic color tokens (ok / warn / danger + soft variants) applied to
+  difficulty chips, judge verdict headlines, WA diff column and warning banners -
+  everything used to share a single blue accent. Dark theme regains card
+  separation (subtle shadow + more opaque border instead of flat none).
+- Skeleton rows replace the text-only loading card in the problem list; shortcut
+  hints (`Ctrl ↵`, `Ctrl+⇧ ↵`) are permanently visible next to Run/Submit.
+
+**Tests & tooling**
+
+- Frontend 36 → 78 cases: new view tests (Problems incl. status filter /
+  favorite rollback / random / density, History, Daily, Analyze, Settings),
+  store tests for the new sync/toast stores, and a router smoke suite asserting
+  every lazy chunk resolves plus guard redirects. Browser-level E2E remains a
+  registered deferred decision (heavyweight dep vs. repo policy, see ROADMAP).
+- Backend 188 → 199 cases: favorites store/endpoint, notes roundtrip,
+  archive qid filtering, ask-with-code context, corrupt-line tolerance.
+- New `npm run check:i18n`: static scan proving every `t('...')` key exists in
+  both zh and en catalogs - first run immediately caught a live bug where the
+  auth-expired banner rendered the raw key `action_relogin` as its button label.
+- pytest now reports coverage by default (pytest-cov added to dev extras;
+  lc/ + server/, branch coverage).
+
+**Docs**
+
+- ARCHITECTURE: storage layout (favorites.json, notes.md), REST contract rows
+  for the new endpoints/params, frontend global-store notes. USAGE: new pages,
+  toast behavior, timeout/interrupted-sync error table entries. PITFALLS: five
+  backfilled traps (error-channel masking, empty-progress ambiguity,
+  fatal-vs-transient error split, test-client URL dot-segment normalization,
+  AbortSignal.timeout fallback). DEVELOPMENT: check:i18n and coverage usage.
+  ROADMAP: this batch table + deferred browser-E2E decision. README feature
+  lists updated in both languages.
+
 ### Hardening pass (2026-08-24): full review across design / UI / logic / tests / docs
 
 Every fix below lists its root cause; symptom patches were not accepted.

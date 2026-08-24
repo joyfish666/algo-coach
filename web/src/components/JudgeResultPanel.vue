@@ -20,6 +20,26 @@ const statusText = computed(() => {
 
 const isInternalError = computed(() => statusKey.value === 'internal_error')
 
+// one semantic mapping: accepted green, every failing state red, unknown
+// neutral - colors come from the shared token palette
+const headlineClass = computed(() => {
+  if (statusKey.value === 'accepted') return 'is-accepted'
+  if (
+    [
+      'wrong_answer',
+      'runtime_error',
+      'compile_error',
+      'tle',
+      'mle',
+      'ole',
+      'internal_error',
+    ].includes(statusKey.value)
+  ) {
+    return 'is-failed'
+  }
+  return 'is-unknown'
+})
+
 const hasMetrics = computed(
   () => Boolean(props.verdict.runtime_display || props.verdict.memory_display)
 )
@@ -56,7 +76,7 @@ const runtimeError = computed(() => (statusKey.value === 'runtime_error'
 
 <template>
   <div class="card result-panel" data-testid="judge-result">
-    <div class="headline" :class="`is-${statusKey}`" :data-internal="isInternalError ? '1' : undefined">{{ statusText }}</div>
+    <div class="headline" :class="headlineClass" :data-internal="isInternalError ? '1' : undefined">{{ statusText }}</div>
 
     <p v-if="statusKey === 'unknown'" class="unknown-hint">
       {{ i18n.t('verdict_unknown_hint') }}
@@ -128,7 +148,11 @@ const runtimeError = computed(() => (statusKey.value === 'runtime_error'
 }
 
 .is-accepted {
-  color: var(--accent);
+  color: var(--ok);
+}
+
+.is-failed {
+  color: var(--danger);
 }
 
 .is-unknown {
@@ -185,7 +209,7 @@ const runtimeError = computed(() => (statusKey.value === 'runtime_error'
 }
 
 .diff {
-  color: var(--accent);
+  color: var(--danger);
 }
 
 .error-block {

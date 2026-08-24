@@ -31,6 +31,12 @@ const routes = [
     meta: { titleKey: 'daily_title' },
   },
   {
+    path: '/history',
+    name: 'history',
+    component: () => import('../views/History.vue'),
+    meta: { titleKey: 'history_title' },
+  },
+  {
     path: '/analyze',
     name: 'analyze',
     component: () => import('../views/Analyze.vue'),

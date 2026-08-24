@@ -636,6 +636,25 @@ def save_testcases(directory: Path, content: str) -> None:
     (directory / "testcases.txt").write_text(content, encoding="utf-8")
 
 
+def read_notes(directory: Path) -> str:
+    notes_path = Path(directory) / "notes.md"
+    if not notes_path.exists():
+        return ""
+    try:
+        return notes_path.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+
+
+def save_notes(directory: Path, content: str) -> None:
+    """Persist the user's per-problem notes.
+
+    Notes are fully user-owned (like solution files): no meta.json hash is
+    recorded, so refresh never touches them.
+    """
+    (Path(directory) / "notes.md").write_text(content, encoding="utf-8")
+
+
 def save_solution(directory: Path, language: str, code: str) -> Path:
     """Write editor content before judging; deliberately does NOT touch
     meta.json hashes so refresh still treats this as user-owned content."""
@@ -689,6 +708,7 @@ def read_problem_state(directory: Path, default_language: str = DEFAULT_LANGUAGE
         "testcases": testcases,
         "cases": cases,
         "solution_mtime": solution_mtime,
+        "notes": read_notes(directory),
     }
 
 

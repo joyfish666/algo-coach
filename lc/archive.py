@@ -170,10 +170,15 @@ class Archive:
                 fh.write(line + "\n")
             self._absorb(record)
 
-    def recent(self, limit: int = 50) -> list:
-        records = []
-        # same lock as append(): a concurrent judge write must not be read
-        # back half-flushed (the corrupt-line skip stays as crash tolerance)
+    def query(self, slug: str | None = None, limit: int = 50) -> list:
+        """Newest-first records, optionally filtered by slug.
+
+        One locked scan primitive shared by every read path (recent list,
+        per-problem history); the append lock is held during the scan so a
+        concurrent judge write is never read back half-flushed. Corrupt-line
+        skip stays as crash-mid-write tolerance.
+        """
+        matched = []
         with self._lock:
             if self.path.exists():
                 with open(self.path, encoding="utf-8") as fh:
@@ -182,10 +187,15 @@ class Archive:
                         if not line:
                             continue
                         try:
-                            records.append(json.loads(line))
+                            record = json.loads(line)
                         except json.JSONDecodeError:
                             continue
-        return list(reversed(records[-limit:]))
+                        if slug is None or record.get("slug") == slug:
+                            matched.append(record)
+        return list(reversed(matched[-max(1, int(limit)):]))
+
+    def recent(self, limit: int = 50) -> list:
+        return self.query(None, limit)
 
     def latest_by_slug(self) -> dict:
         with self._lock:

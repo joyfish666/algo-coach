@@ -4,6 +4,7 @@ import { useRoute } from 'vue-router'
 
 import LanguageSwitch from './components/LanguageSwitch.vue'
 import ThemeSwitch from './components/ThemeSwitch.vue'
+import ToastHost from './components/ToastHost.vue'
 import {
   debugClear,
   debugCopyToClipboard,
@@ -13,10 +14,12 @@ import {
 } from './debug'
 import { useI18nStore } from './stores/i18n'
 import { useStatusStore } from './stores/status'
+import { useSyncStore } from './stores/sync'
 import { useThemeStore } from './stores/theme'
 
 const i18n = useI18nStore()
 const status = useStatusStore()
+const sync = useSyncStore()
 const theme = useThemeStore()
 const route = useRoute()
 
@@ -37,7 +40,7 @@ function onAuthExpired() {
 
 onMounted(() => {
   theme.init()
-  status.refresh()
+  status.refresh().then(() => sync.adoptFromStatus(status.sync))
   window.addEventListener('algocoach:auth-expired', onAuthExpired)
 })
 
@@ -97,6 +100,13 @@ watch(
             </svg>
             <span>{{ i18n.t('nav_daily') }}</span>
           </RouterLink>
+          <RouterLink to="/history" class="nav-item">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M4.5 5.5h15v13h-15z" />
+              <path d="M7.5 9.5h9M7.5 12.5h9M7.5 15.5h5" />
+            </svg>
+            <span>{{ i18n.t('nav_history') }}</span>
+          </RouterLink>
           <RouterLink to="/analyze" class="nav-item">
             <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
               <path d="M5 20V12M12 20V5.5M19 20v-5" />
@@ -123,6 +133,8 @@ watch(
     <main class="content">
       <RouterView />
     </main>
+
+    <ToastHost />
 
     <div v-if="debugEnabled" class="debug-bar" data-testid="debug-bar">
       <span class="debug-count">DEBUG · {{ debugEntries.length }}</span>

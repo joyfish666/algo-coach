@@ -1,6 +1,19 @@
 import { debugEnabled, debugLog } from './debug'
 import { useI18nStore } from './stores/i18n'
 
+// Every fetch gets an abort deadline: without one, a hung backend (TCP
+// established, response never arriving) freezes the calling view forever.
+// The caps sit comfortably above the backend's own ceilings (LLM 120s,
+// submit polling 120s) so the frontend never aborts a healthy call first.
+const DEFAULT_TIMEOUT_MS = 45000
+
+function timeoutSignal(timeoutMs) {
+  if (!timeoutMs || typeof AbortSignal === 'undefined' || !AbortSignal.timeout) {
+    return undefined // older browsers: degrade to no timeout instead of breaking
+  }
+  return AbortSignal.timeout(timeoutMs)
+}
+
 function translateMessageKey(key) {
   if (!key) return null
   try {
@@ -50,8 +63,21 @@ async function handle(response) {
   return response.json()
 }
 
-function request(url, options = {}) {
-  return fetch(url, options).then(handle)
+async function request(url, options = {}) {
+  const { timeoutMs = DEFAULT_TIMEOUT_MS, ...fetchOptions } = options
+  const signal = timeoutSignal(timeoutMs)
+  if (signal) {
+    fetchOptions.signal = signal
+  }
+  try {
+    return await fetch(url, fetchOptions).then(handle)
+  } catch (err) {
+    if (err instanceof DOMException && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
+      const i18n = useI18nStore()
+      throw new Error(i18n.t('request_timeout'), { cause: err })
+    }
+    throw err
+  }
 }
 
 export const api = {
@@ -74,9 +100,12 @@ export const api = {
     request('/api/problems/sync', { method: 'POST' }),
   getSyncProgress: () => request('/api/problems/sync/progress'),
   getDaily: () => request('/api/daily'),
-  getProblem: (qid) => request(`/api/problem/${encodeURIComponent(qid)}`),
+  getProblem: (qid) =>
+    request(`/api/problem/${encodeURIComponent(qid)}`, { timeoutMs: 60000 }),
   getTemplate: (qid, lang) =>
-    request(`/api/problem/${encodeURIComponent(qid)}/template?lang=${encodeURIComponent(lang)}`),
+    request(`/api/problem/${encodeURIComponent(qid)}/template?lang=${encodeURIComponent(lang)}`, {
+      timeoutMs: 60000,
+    }),
   putTestcases: (qid, content) =>
     request(`/api/problem/${encodeURIComponent(qid)}/testcases`, {
       method: 'PUT',
@@ -94,30 +123,52 @@ export const api = {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
+      timeoutMs: 90000,
     }),
   judgeSubmit: (body) =>
     request('/api/judge/submit', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
+      timeoutMs: 150000,
     }),
   analyze: (body = { use_llm: false }) =>
     request('/api/analyze', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
+      timeoutMs: 150000,
     }),
   ask: (body) =>
     request('/api/ask', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
+      timeoutMs: 150000,
     }),
   importSite: (limit = 20) =>
     request('/api/archive/import-site', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ limit }),
+      timeoutMs: 120000,
+    }),
+  archiveRecent: ({ limit = 50, qid } = {}) => {
+    const params = new URLSearchParams({ limit: String(limit) })
+    if (qid) params.set('qid', qid)
+    return request(`/api/archive/recent?${params.toString()}`)
+  },
+  putNotes: (qid, content) =>
+    request(`/api/problem/${encodeURIComponent(qid)}/notes`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content }),
+    }),
+  putFavorite: (qid, favorite) =>
+    request(`/api/problem/${encodeURIComponent(qid)}/favorite`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ favorite }),
     }),
   clearLocalData: () => request('/api/local-data', { method: 'DELETE' }),
 }

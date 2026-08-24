@@ -6,9 +6,9 @@
 web (Vue 3 SPA)  ↔  server/api.py (FastAPI 薄封装)  ↔  lc (核心业务层)  ↔  sites/cn.py (leetcode.cn 适配)
 ```
 
-- **web/**：Vue 3 + Vite + Pinia + Vue Router + CodeMirror 6；构建产物 `web/dist` 由 FastAPI 静态托管；开发模式 Vite :5173 proxy `/api` → :8000。
+- **web/**：Vue 3 + Vite + Pinia + Vue Router + CodeMirror 6；构建产物 `web/dist` 由 FastAPI 静态托管；开发模式 Vite :5173 proxy `/api` → :8000。全局通知走 toast store（成功自动消退、错误驻留至手动关闭）；同步轮询由应用级 sync store 持有，跨路由存活、页面刷新后自动重新接管进行中的后端同步。
 - **server/api.py**：REST 层。领域异常翻译为结构化错误 JSON；SPA catch-all 回退 index.html（`relative_to` 严格限制在 dist 内）；Host（含 IPv6 括号格式）/ Origin 校验中间件——写方法要求白名单本地 Origin（含 Vite dev 来源 `http://localhost:5173`），GET 免 Origin 但 Host 必须本地（防 DNS rebinding），`{qid}` 入口统一做 slug 字符白名单校验；带阻塞网络 IO 的长端点一律普通 def 走线程池。
-- **lc/**：与 UI 框架解耦的核心业务层：config / auth / httpclient / exceptions / logutil / i18n / langs / problems / judge / archive / llm。
+- **lc/**：与 UI 框架解耦的核心业务层：config / auth / httpclient / exceptions / logutil / i18n / langs / problems / judge / archive / favorites / llm。
 - **sites/cn.py**：所有 GraphQL 响应解析单点收口，字段缺失降级为清晰报错而非崩溃。
 - **SiteAdapter 抽象**（sites/base.py）：最小接口，只为 cn 实现；leetcode.com 待需求验证。
 
@@ -19,12 +19,15 @@ web (Vue 3 SPA)  ↔  server/api.py (FastAPI 薄封装)  ↔  lc (核心业务�
 ├── config.toml            schema_version、Cookie、LLM 配置（界面偏好存浏览器 localStorage，不入配置文件）
 ├── problems.json          题库缓存（题号↔slug、付费标记、难度、标签、类别）
 ├── submissions.jsonl      提交归档（JSON Lines 追加）
+├── favorites.json         收藏索引（slug 列表；列表页需对全量题目渲染收藏态，
+│                          而工作区目录只为打开过的题目存在，故用独立索引文件）
 └── workspace/problems/    工作区根目录（workspace_root 可配置）
     └── 0001-two-sum/
         ├── statement.md       中文题面（文件名统一 ASCII）
         ├── solution.cpp       代码模板（多语言共存 solution.py 等）
         ├── cases.json         官方示例正本（exampleTestcases 解码后每组用例一条）
-        └── testcases.txt      人工编辑工作副本
+        ├── testcases.txt      人工编辑工作副本
+        └── notes.md           用户笔记（完全用户所有，refresh 不触碰）
 ```
 
 目录命名：题号全数字时 `0001-two-sum/`（zfill 补零），非数字时直接用 slug。
@@ -48,7 +51,9 @@ POST /api/setup/validate-cookie     引导页即时校验
 GET  /api/settings                  读取（敏感字段脱敏，仅回显尾 4 字符）
 PUT  /api/settings                  更新（Cookie 变更即时重建会话；
                                     request_interval 限定 [0.5, 60] 秒，越界 422）
-GET  /api/problems                  全量返回本地缓存（筛选分页由前端执行）
+GET  /api/problems                  全量返回本地缓存（筛选分页由前端执行）；
+                                    每行按归档索引富化 practice_status/last_practice_at，
+                                    并按收藏索引附加 favorite 标记
 POST /api/problems/sync             同步题库（进行中重复调用返回 409）。
                                     续传仅发生在上次失败后；成功后的再次同步
                                     永远全新全量，保证站点新增题目可见
@@ -60,14 +65,18 @@ POST /api/problem/{qid}/refresh     显式重抓题目详情并刷新工作区�
 GET  /api/problem/{qid}/template    ?lang=cpp 按需抓取该语言模板并落盘
 PUT  /api/problem/{qid}/solution    编辑器代码落盘（debounce 自动保存/保存即判定共用）
 PUT  /api/problem/{qid}/testcases   自定义用例面板保存
+PUT  /api/problem/{qid}/notes       笔记落盘 notes.md
+PUT  /api/problem/{qid}/favorite    收藏切换 {favorite: bool}（写 favorites.json 索引）
 POST /api/judge/run                 {qid, lang, code, use_local?} 先落盘再判定，不进提交历史；
                                     远程运行合并 cases.json 全部官方示例（data_input 换行拼接）
 POST /api/judge/submit              {qid, lang, code} 阻塞长轮询至判定完成或超时；
                                     完成后自动归档；超时走「结果未知」路径并归档
-GET  /api/archive/recent            本地归档最近记录
+GET  /api/archive/recent            本地归档最近记录；?qid= 按题目过滤、?limit≤200，
+                                    统一走 Archive.query() 加锁扫描原语（newest-first）
 POST /api/archive/import-site       submissionList 导入（≤20 条边界，去重键 = submission_id，
                                     状态分类与判题共用 cn.classify_status_text 单一来源）
-POST /api/ask                       无状态问答 {question, history?, qid}——题目与最近判定自动入上下文
+POST /api/ask                       无状态问答 {question, history?, qid, code?, lang?}——
+                                    题目与最近判定自动入上下文；code 为用户显式附带当前代码（截断 6000 字符）
 POST /api/analyze                   解题统计 + 标签掌握度 + 推荐 + AI 报告（use_llm 可关）
 DELETE /api/local-data              清除全部本地数据（题库缓存/归档/工作区/配置），
                                     同步进行中返回 409；保留运行中的 instance.lock

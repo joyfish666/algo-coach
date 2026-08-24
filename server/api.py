@@ -30,7 +30,7 @@ from pydantic import BaseModel
 from urllib.parse import urlparse
 
 import lc
-from lc import auth, judge, problems
+from lc import auth, favorites, judge, problems
 from lc.archive import Archive, build_record, compute_stats, recommend_problems, tag_mastery
 from lc.config import effective_config, save as save_config, workspace_root_path
 from lc.exceptions import (
@@ -349,6 +349,7 @@ def update_settings(payload: SettingsUpdate):
 def get_problems():
     payload = problems.load_problems()
     latest = get_archive().latest_by_slug()
+    favorite_slugs = favorites.load_favorites()
     rows = []
     for row in payload.get("problems", []):
         verdict = latest.get(row.get("slug"))
@@ -358,6 +359,8 @@ def get_problems():
                 "practice_status": verdict.get("status"),
                 "last_practice_at": verdict.get("timestamp"),
             }
+        if row.get("slug") in favorite_slugs:
+            row = {**row, "favorite": True}
         rows.append(row)
     return {
         "total": payload.get("total", 0),
@@ -420,6 +423,7 @@ def _open_or_refresh(slug: str, refresh: bool) -> dict:
     state.setdefault("slug", slug)
     state["dir"] = directory.name
     state["path"] = str(directory)
+    state["favorite"] = favorites.is_favorite(slug)
     return state
 
 
@@ -493,6 +497,34 @@ def put_solution(qid: str, payload: SolutionPayload):
         raise HTTPException(status_code=404, detail=t("problem_not_found"))
     path = problems.save_solution(directory, payload.lang, payload.code)
     return {"slug": qid, "lang": payload.lang, "saved": True, "mtime": path.stat().st_mtime}
+
+
+class NotesPayload(BaseModel):
+    content: str
+
+
+@app.put("/api/problem/{qid}/notes")
+def put_notes(qid: str, payload: NotesPayload):
+    _require_safe_slug(qid)
+    workspace = _workspace_root()
+    directory = problems.find_problem_dir(workspace, qid)
+    if directory is None:
+        raise HTTPException(status_code=404, detail=t("problem_not_found"))
+    problems.save_notes(directory, payload.content)
+    return {"slug": qid, "saved": True}
+
+
+class FavoritePayload(BaseModel):
+    favorite: bool
+
+
+@app.put("/api/problem/{qid}/favorite")
+def put_favorite(qid: str, payload: FavoritePayload):
+    """Toggle the list-level favorite flag for one problem."""
+    _require_safe_slug(qid)
+    state = favorites.set_favorite(qid, bool(payload.favorite))
+    logger.info("favorite %s -> %s", qid, state)
+    return {"slug": qid, "favorite": state}
 
 
 def _problem_row_for(slug: str, adapter=None, cache_rows=None) -> dict:
@@ -656,6 +688,8 @@ class AskPayload(BaseModel):
     question: str
     history: list = []
     qid: str | None = None
+    code: str | None = None
+    lang: str | None = None
 
 
 @app.post("/api/ask")
@@ -681,6 +715,13 @@ def ask_endpoint(payload: AskPayload):
                 f"上次判定: {verdict.get('status', 'unknown')}，通过用例 {passed}，"
                 f"用时 {verdict.get('runtime_display') or '—'}，内存 {verdict.get('memory_display') or '—'}"
             )
+
+    # editor code is opt-in: the user attaches it explicitly per question so a
+    # long solution is not shipped to the LLM on every casual ask
+    if payload.code and payload.code.strip():
+        lang_label = payload.lang or "text"
+        snippet = payload.code[:6000]
+        context_parts.append(f"当前代码（{lang_label}）:\n```\n{snippet}\n```")
 
     system_prompt = COACH_SYSTEM_PROMPT
     if context_parts:
@@ -758,9 +799,12 @@ def analyze_endpoint(payload: AnalyzePayload):
 
 
 @app.get("/api/archive/recent")
-def archive_recent(limit: int = 50):
+def archive_recent(limit: int = 50, qid: str | None = None):
     capped = max(1, min(int(limit), 200))
-    return {"records": get_archive().recent(capped)}
+    slug = qid or None
+    if slug:
+        _require_safe_slug(slug)
+    return {"records": get_archive().query(slug=slug, limit=capped)}
 
 
 class ImportSitePayload(BaseModel):

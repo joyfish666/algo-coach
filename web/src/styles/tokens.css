@@ -5,6 +5,15 @@
   --text-primary: #212121;
   --accent: #2563eb;
 
+  /* semantic feedback colors: one source of truth for difficulty chips,
+     verdict headlines, toasts and warning banners */
+  --ok: #16a34a;
+  --ok-soft: rgba(22, 163, 74, 0.12);
+  --warn: #d97706;
+  --warn-soft: rgba(217, 119, 6, 0.14);
+  --danger: #dc2626;
+  --danger-soft: rgba(220, 38, 38, 0.12);
+
   --border-subtle: rgba(176, 176, 176, 0.45);
   --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.04);
 
@@ -31,8 +40,17 @@
   --text-primary: #ededed;
   --accent: #3b82f6;
 
-  --border-subtle: rgba(78, 78, 78, 0.6);
-  --shadow-card: none;
+  --ok: #4ade80;
+  --ok-soft: rgba(74, 222, 128, 0.14);
+  --warn: #fbbf24;
+  --warn-soft: rgba(251, 191, 36, 0.16);
+  --danger: #f87171;
+  --danger-soft: rgba(248, 113, 113, 0.16);
+
+  /* flat cards melt into the dark background; a faint shadow plus a more
+     opaque border keeps surfaces distinguishable */
+  --border-subtle: rgba(120, 120, 120, 0.55);
+  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.45);
 }
 
 * {
@@ -188,9 +206,59 @@ button {
 }
 
 .chip-ok {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #ffffff;
+  background: var(--ok-soft);
+  border-color: var(--ok);
+  color: var(--ok);
+}
+
+/* semantic difficulty / verdict accents; text-only so they stay readable on
+   both themes and inside list rows */
+.chip-easy {
+  border-color: var(--ok);
+  color: var(--ok);
+}
+
+.chip-medium {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+
+.chip-hard {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.kbd {
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  color: var(--gray-neutral);
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 11px;
+  padding: 0 var(--space-1);
+  white-space: nowrap;
+}
+
+/* skeleton placeholder: shimmer block shown while a list loads, so the
+   perceived wait is "content arriving" instead of an empty page */
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--bg-secondary) 25%,
+    rgba(128, 128, 128, 0.15) 50%,
+    var(--bg-secondary) 75%
+  );
+  background-size: 200% 100%;
+  border-radius: var(--radius-card);
+  animation: skeleton-shimmer 1.4s ease infinite;
+}
+
+@keyframes skeleton-shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
 }
 
 .field-label {

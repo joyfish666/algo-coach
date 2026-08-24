@@ -9,18 +9,23 @@ import JudgeResultPanel from '../components/JudgeResultPanel.vue'
 import PageHeader from '../components/PageHeader.vue'
 import { api } from '../api'
 import { useI18nStore } from '../stores/i18n'
+import { useToastStore } from '../stores/toast'
 import { loadSnapshot, saveSnapshot, snapshotNewerThan } from '../snapshots'
 
 const props = defineProps({ qid: { type: String, required: true } })
 
 const i18n = useI18nStore()
+const toast = useToastStore()
 
 const md = new MarkdownIt({ html: false, linkify: false, breaks: false })
 
 const SPLIT_KEY = 'algocoach-workbench-split'
 
 const loading = ref(true)
-const errorText = ref('')
+// fatal: the problem itself could not be loaded, the whole workbench cannot
+// render. Transient action failures (autosave, run, submit) must NOT land
+// here - one flaky PUT used to tear down the entire editor surface.
+const loadError = ref('')
 const problem = ref(null)
 const code = ref('')
 const lang = ref('cpp')
@@ -38,6 +43,28 @@ const casesOpen = ref(true)
 const casesDraft = ref('')
 const casesSaving = ref(false)
 const casesSavedAt = ref('')
+
+const notesDraft = ref('')
+const notesSavedAt = ref('')
+let notesTimer = null
+
+const favorite = ref(false)
+
+function errorMessageFor(err) {
+  const keyFromServer = err && err.payload && err.payload.error && err.payload.error.message_key
+  if (keyFromServer) {
+    const translated = i18n.t(keyFromServer)
+    if (translated !== keyFromServer) return translated
+  }
+  if (err && err.status === 403) return i18n.t('premium_problem')
+  return (err && err.message) || 'error'
+}
+
+// transient failures surface as toasts; the workbench stays alive and the
+// user keeps their in-progress code visible
+function notifyActionError(err) {
+  toast.error({ text: errorMessageFor(err) })
+}
 
 const inflightRun = ref(false)
 const inflightSubmit = ref(false)
@@ -161,7 +188,7 @@ const languageOptions = computed(() =>
 async function loadProblem() {
   const qidAtStart = props.qid
   loading.value = true
-  errorText.value = ''
+  loadError.value = ''
   verdict.value = null
   try {
     const data = await api.getProblem(props.qid)
@@ -173,6 +200,8 @@ async function loadProblem() {
         : data.languages_available[0] || 'cpp'
     code.value = data.code || ''
     casesDraft.value = data.testcases || ''
+    notesDraft.value = data.notes || ''
+    favorite.value = Boolean(data.favorite)
     statementHtml.value = md.render(data.statement_markdown || '')
 
     const snap = loadSnapshot(props.qid, lang.value)
@@ -186,33 +215,21 @@ async function loadProblem() {
     }
   } catch (err) {
     if (props.qid !== qidAtStart) return
-    applyError(err)
+    applyLoadError(err)
   } finally {
     if (props.qid === qidAtStart) loading.value = false
   }
 }
 
-function applyError(err) {
-  const keyFromServer =
-    err && err.payload && err.payload.error && err.payload.error.message_key
-  if (keyFromServer) {
-    const translated = i18n.t(keyFromServer)
-    errorText.value = translated !== keyFromServer ? translated : keyFromServer
-    const detail = err.payload?.error?.detail
-    if (detail && detail.last_poll) {
-      try {
-        errorText.value +=
-          '\n' + JSON.stringify(detail.last_poll).slice(0, 400)
-      } catch {
-      }
+function applyLoadError(err) {
+  loadError.value = errorMessageFor(err)
+  const detail = err && err.payload && err.payload.error && err.payload.error.detail
+  if (detail && detail.last_poll) {
+    try {
+      loadError.value += '\n' + JSON.stringify(detail.last_poll).slice(0, 400)
+    } catch {
     }
-    return
   }
-  if (err && err.status === 403) {
-    errorText.value = i18n.t('premium_problem')
-    return
-  }
-  errorText.value = (err && err.message) || 'error'
 }
 
 function scheduleAutosave() {
@@ -251,7 +268,7 @@ watch(lang, async (_next, prev) => {
       problem.value.languages_available.push(_next)
     }
   } catch (err) {
-    applyError(err)
+    notifyActionError(err)
     lang.value = prev
   } finally {
     switchingLang.value = false
@@ -276,9 +293,38 @@ async function saveCases() {
     await api.putTestcases(props.qid, casesDraft.value)
     casesSavedAt.value = new Date().toLocaleTimeString()
   } catch (err) {
-    applyError(err)
+    notifyActionError(err)
   } finally {
     casesSaving.value = false
+  }
+}
+
+function scheduleNotesSave() {
+  clearTimeout(notesTimer)
+  notesTimer = setTimeout(flushNotesSave, 1200)
+}
+
+async function flushNotesSave() {
+  clearTimeout(notesTimer)
+  notesTimer = null
+  try {
+    await api.putNotes(props.qid, notesDraft.value)
+    notesSavedAt.value = new Date().toLocaleTimeString()
+  } catch {
+    /* transient; the user can retry by editing again */
+  }
+}
+
+watch(notesDraft, () => scheduleNotesSave())
+
+async function toggleFavorite() {
+  const next = !favorite.value
+  favorite.value = next
+  try {
+    await api.putFavorite(props.qid, next)
+  } catch (err) {
+    favorite.value = !next
+    notifyActionError(err)
   }
 }
 
@@ -286,7 +332,6 @@ async function runCode() {
   if (inflightRun.value) return
   inflightRun.value = true
   verdict.value = null
-  errorText.value = ''
   clearTimeout(autosaveTimer)
   startJudgingIndicator()
   try {
@@ -298,7 +343,7 @@ async function runCode() {
       use_local: useLocalCases.value,
     })
   } catch (err) {
-    applyError(err)
+    notifyActionError(err)
   } finally {
     inflightRun.value = false
     stopJudgingIndicator()
@@ -309,7 +354,6 @@ async function submitCode() {
   if (inflightSubmit.value) return
   inflightSubmit.value = true
   verdict.value = null
-  errorText.value = ''
   clearTimeout(autosaveTimer)
   startJudgingIndicator()
   try {
@@ -320,7 +364,7 @@ async function submitCode() {
       code: code.value,
     })
   } catch (err) {
-    applyError(err)
+    notifyActionError(err)
   } finally {
     inflightSubmit.value = false
     stopJudgingIndicator()
@@ -331,7 +375,7 @@ async function submitCode() {
 // should not require leaving the keyboard
 function onKeydown(event) {
   if (!(event.ctrlKey || event.metaKey) || event.key !== 'Enter') return
-  if (!problem.value || errorText.value) return
+  if (!problem.value || loadError.value) return
   event.preventDefault()
   if (event.shiftKey) submitCode()
   else runCode()
@@ -361,15 +405,18 @@ watch(
   () => props.qid,
   (next, prev) => {
     if (!next || !prev || next === prev) return
-    // pending debounced save must not land under the new qid
+    // pending debounced saves must not land under the new qid
     clearTimeout(autosaveTimer)
     autosaveTimer = null
+    clearTimeout(notesTimer)
+    notesTimer = null
     saveSnapshot(prev, lang.value, code.value)
     verdict.value = null
-    errorText.value = ''
+    loadError.value = ''
     showRestoreBar.value = false
     restoreCandidate.value = null
     statementHtml.value = ''
+    notesSavedAt.value = ''
     stopJudgingIndicator()
     loadProblem()
   }
@@ -379,6 +426,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('beforeunload', onBeforeUnload)
   window.removeEventListener('keydown', onKeydown)
   clearTimeout(autosaveTimer)
+  clearTimeout(notesTimer)
   stopJudgingIndicator()
 })
 </script>
@@ -387,9 +435,9 @@ onBeforeUnmount(() => {
   <section class="page page-wide">
     <div v-if="loading" class="card empty-state">{{ i18n.t('loading_problem') }}</div>
 
-    <template v-else-if="errorText">
+    <template v-else-if="loadError">
       <div class="card empty-state" data-testid="workbench-error">
-        <p>{{ errorText }}</p>
+        <p>{{ loadError }}</p>
         <button class="btn btn-ghost" type="button" @click="loadProblem">
           {{ i18n.t('retry') }}
         </button>
@@ -414,9 +462,20 @@ onBeforeUnmount(() => {
       <PageHeader :title="problem.title_cn || problem.title_en || problem.slug">
         <template #subtitle>
           <span class="meta-row">
+            <button
+              class="fav-btn"
+              :class="{ active: favorite }"
+              type="button"
+              :title="favorite ? i18n.t('fav_remove') : i18n.t('fav_add')"
+              data-testid="workbench-fav"
+              @click="toggleFavorite"
+            >
+              {{ favorite ? '★' : '☆' }}
+            </button>
             <RouterLink
               v-if="problem.difficulty"
               class="chip chip-link"
+              :class="['easy', 'medium', 'hard'].includes(problem.difficulty) ? `chip-${problem.difficulty}` : ''"
               :to="{ path: '/problems', query: { difficulty: problem.difficulty } }"
             >
               {{ problem.difficulty }}
@@ -446,6 +505,21 @@ onBeforeUnmount(() => {
             <ul>
               <li v-for="(hint, index) in problem.hints" :key="index">{{ hint }}</li>
             </ul>
+          </details>
+
+          <details class="card notes-card">
+            <summary>{{ i18n.t('notes_title') }}</summary>
+            <p class="hint-text notes-hint">
+              {{ i18n.t('notes_hint') }}
+              <span v-if="notesSavedAt" data-testid="notes-saved">· {{ i18n.t('notes_saved') }} {{ notesSavedAt }}</span>
+            </p>
+            <textarea
+              v-model="notesDraft"
+              class="input notes-input"
+              rows="6"
+              data-testid="notes-input"
+              placeholder="# 思路 / 复杂度 / 踩坑"
+            ></textarea>
           </details>
         </section>
 
@@ -480,6 +554,7 @@ onBeforeUnmount(() => {
                   <span>{{ i18n.t('use_local_cases') }}</span>
                 </label>
                 <span class="spacer"></span>
+                <span class="kbd">Ctrl ↵</span>
                 <button
                   class="btn btn-ghost"
                   type="button"
@@ -490,6 +565,7 @@ onBeforeUnmount(() => {
                 >
                   {{ i18n.t('run') }}
                 </button>
+                <span class="kbd">Ctrl+⇧ ↵</span>
                 <button
                   class="btn btn-primary"
                   type="button"
@@ -547,7 +623,11 @@ onBeforeUnmount(() => {
       <JudgeResultPanel v-if="verdict" :verdict="verdict" />
     </template>
 
-    <AiChatSidebar v-if="problem && problem.supported !== false" :qid="problem.slug || props.qid" />
+      <AiChatSidebar
+        v-if="problem && problem.supported !== false"
+        :qid="problem.slug || props.qid"
+        :get-code="() => code"
+      />
   </section>
 </template>
 
@@ -564,6 +644,10 @@ onBeforeUnmount(() => {
   gap: var(--space-3);
   margin-bottom: var(--space-4);
   padding: var(--space-4);
+}
+
+.banner-warn {
+  border-color: var(--warn);
 }
 
 .banner-accent {
@@ -585,6 +669,36 @@ onBeforeUnmount(() => {
 .slug-code {
   color: var(--gray-neutral);
   font-size: var(--font-size-caption);
+}
+
+.fav-btn {
+  background: transparent;
+  border: none;
+  color: var(--gray-neutral);
+  cursor: pointer;
+  font-size: var(--font-size-title);
+  line-height: 1;
+  padding: 0;
+}
+
+.fav-btn:hover,
+.fav-btn.active {
+  color: var(--warn);
+}
+
+.notes-card summary {
+  color: var(--gray-neutral);
+  cursor: pointer;
+  font-size: var(--font-size-caption);
+}
+
+.notes-hint {
+  margin: var(--space-2) 0;
+}
+
+.notes-input {
+  resize: vertical;
+  width: 100%;
 }
 
 .wb {

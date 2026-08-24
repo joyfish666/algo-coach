@@ -1,13 +1,31 @@
-export function filterProblems(rows, { keyword = '', difficulty = '', tagSlug = '' } = {}) {
+export function filterProblems(
+  rows,
+  { keyword = '', difficulty = '', tagSlug = '', status = '' } = {}
+) {
   const kw = keyword.trim().toLowerCase()
   return (rows || []).filter((row) => {
     if (difficulty && row.difficulty !== difficulty) return false
     if (tagSlug && !(row.tags || []).some((tag) => tag.slug === tagSlug)) return false
+    if (status) {
+      const solved = row.practice_status === 'accepted'
+      const attempted = Boolean(row.practice_status) && !solved
+      if (status === 'solved' && !solved) return false
+      if (status === 'attempted' && !attempted) return false
+      // "todo" means never practiced; "favorite" is the starred index
+      if (status === 'todo' && row.practice_status) return false
+      if (status === 'favorite' && !row.favorite) return false
+    }
     if (!kw) return true
     return [row.frontend_id, row.title_cn, row.title_en, row.slug].some((field) =>
       String(field || '').toLowerCase().includes(kw)
     )
   })
+}
+
+export function pickRandom(rows) {
+  const list = rows || []
+  if (!list.length) return null
+  return list[Math.floor(Math.random() * list.length)]
 }
 
 export function paginate(rows, page, size) {

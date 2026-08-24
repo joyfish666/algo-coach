@@ -73,6 +73,11 @@ function difficultyLabel(value) {
   return key ? i18n.t(key) : value
 }
 
+function difficultyClass(value) {
+  const level = (value || '').toLowerCase()
+  return ['easy', 'medium', 'hard'].includes(level) ? `chip-${level}` : ''
+}
+
 onMounted(() => loadAnalyze(false))
 </script>
 
@@ -127,7 +132,7 @@ onMounted(() => loadAnalyze(false))
               <RouterLink :to="`/problem/${row.slug}`" class="rec-item">
                 <span class="mono rec-id">{{ row.frontend_id }}</span>
                 <span>{{ row.title_cn || row.title_en || row.slug }}</span>
-                <span v-if="row.difficulty" class="chip">{{ difficultyLabel(row.difficulty) }}</span>
+                <span v-if="row.difficulty" class="chip" :class="difficultyClass(row.difficulty)">{{ difficultyLabel(row.difficulty) }}</span>
               </RouterLink>
             </li>
           </ul>

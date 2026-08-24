@@ -7,6 +7,8 @@ const props = defineProps({
   row: { type: Object, required: true },
 })
 
+const emit = defineEmits(['toggle-favorite'])
+
 const i18n = useI18nStore()
 
 const difficultyLabel = computed(() => {
@@ -15,10 +17,21 @@ const difficultyLabel = computed(() => {
   return key ? i18n.t(key) : ''
 })
 
+// semantic color class comes straight from the token palette so the chip
+// can never drift from the rest of the design system
+const difficultyClass = computed(() => {
+  const level = (props.row.difficulty || '').toLowerCase()
+  return ['easy', 'medium', 'hard'].includes(level) ? `chip-${level}` : ''
+})
+
 const visibleTags = computed(() => (props.row.tags || []).slice(0, 3))
 const extraTagCount = computed(() => Math.max(0, (props.row.tags || []).length - 3))
 
 const title = computed(() => props.row.title_cn || props.row.title_en || props.row.slug)
+
+function onToggleFavorite() {
+  emit('toggle-favorite', { slug: props.row.slug, next: !props.row.favorite })
+}
 </script>
 
 <template>
@@ -35,16 +48,26 @@ const title = computed(() => props.row.title_cn || props.row.title_en || props.r
     </span>
     <span class="pright">
       <span
-        v-if="row.practice_status === 'accepted'"
-        class="chip chip-ok"
-        data-testid="status-solved"
+        role="button"
+        tabindex="0"
+        class="fav"
+        :class="{ active: row.favorite }"
+        :title="row.favorite ? i18n.t('fav_remove') : i18n.t('fav_add')"
+        :aria-label="row.favorite ? i18n.t('fav_remove') : i18n.t('fav_add')"
+        :aria-pressed="row.favorite ? 'true' : 'false'"
+        data-testid="fav-toggle"
+        @click.stop.prevent="onToggleFavorite"
+        @keydown.enter.stop.prevent="onToggleFavorite"
       >
+        {{ row.favorite ? '★' : '☆' }}
+      </span>
+      <span v-if="row.practice_status === 'accepted'" class="chip chip-ok pstatus" data-testid="status-solved">
         ✓ {{ i18n.t('status_solved') }}
       </span>
-      <span v-else-if="row.practice_status" class="chip" data-testid="status-attempted">
+      <span v-else-if="row.practice_status" class="chip pstatus" data-testid="status-attempted">
         {{ i18n.t('status_attempted') }}
       </span>
-      <span v-if="difficultyLabel" class="chip">{{ difficultyLabel }}</span>
+      <span v-if="difficultyLabel" class="chip" :class="difficultyClass">{{ difficultyLabel }}</span>
       <span
         v-if="row.paid_only"
         class="paid-mark"
@@ -122,6 +145,19 @@ const title = computed(() => props.row.title_cn || props.row.title_en || props.r
   flex-shrink: 0;
   gap: var(--space-2);
   margin-left: auto;
+}
+
+.fav {
+  color: var(--gray-neutral);
+  cursor: pointer;
+  font-size: var(--font-size-body);
+  line-height: 1;
+  user-select: none;
+}
+
+.fav:hover,
+.fav.active {
+  color: var(--warn);
 }
 
 .paid-mark {

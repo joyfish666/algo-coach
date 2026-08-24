@@ -11,11 +11,13 @@ python -m venv .venv
 source .venv/bin/activate      # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
 ruff check .                   # CI 会跑，提交前先本地过一遍
-pytest
+pytest                         # 自带 --cov 覆盖率报告（lc/ + server/，含分支覆盖）
 ```
 
 - 单元测试 HTTP 全 mock，不真连网络；默认通过 pyproject `addopts` 排除
   `integration` 标记（CI 同样不跑）。
+- `pytest` 默认输出覆盖率表（pytest-cov 在 dev 依赖组）；只看某个文件的缺失行：
+  `pytest tests/test_archive.py --cov=lc.archive --cov-report=term-missing`。
 - 真网回归用例集中在 `tests/test_integration_live.py`，手动运行：
 
   ```bash
@@ -31,11 +33,16 @@ pytest
 ```bash
 cd web
 npm install
-npm run dev      # http://localhost:5173
-npm run build    # 产物 web/dist/
-npm run lint     # eslint
-npm run test     # vitest
+npm run dev         # http://localhost:5173
+npm run build       # 产物 web/dist/
+npm run lint        # eslint
+npm run test        # vitest
+npm run check:i18n  # i18n 目录完整性校验（CI 会跑）
 ```
+
+`check:i18n` 静态扫描全部 `t('...')` 调用键，要求：键必须同时存在于 zh 与 en 目录，
+且两份目录键集合一致。`t()` 对缺键静默回退原键名，这类缺陷（曾把裸键渲染上屏）
+现在会在 CI 直接失败。动态拼接的键（如 `` t(`verdict_${key}`) ``）不在校验范围。
 
 ## 开发模式双服务
 

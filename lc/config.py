@@ -25,6 +25,7 @@ APP_DIR_NAME = ".algocoach"
 CONFIG_FILE_NAME = "config.toml"
 PROBLEMS_CACHE_NAME = "problems.json"
 ARCHIVE_FILE_NAME = "submissions.jsonl"
+FAVORITES_FILE_NAME = "favorites.json"
 INSTANCE_LOCK_NAME = "instance.lock"
 
 DEFAULTS = {
@@ -75,6 +76,10 @@ def problems_cache_path() -> Path:
 
 def archive_path() -> Path:
     return app_dir() / ARCHIVE_FILE_NAME
+
+
+def favorites_path() -> Path:
+    return app_dir() / FAVORITES_FILE_NAME
 
 
 def workspace_root_path(config: dict) -> Path:
