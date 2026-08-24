@@ -9,13 +9,17 @@ Layer rules:
 - blocking network endpoints are plain def so they run in the thread pool
 - Origin / Host guard middleware: state-changing methods require a whitelisted
   local origin (including the Vite dev origin http://localhost:5173); GET may
-  omit Origin but the Host header must be local (DNS-rebinding protection)
+  omit Origin but the Host header must be local (DNS-rebinding protection);
+  forced refresh lives on POST /api/problem/{qid}/refresh so GET never force-
+  refetches; note GET still lazily materializes a not-yet-open problem (fetch
+  once, then serve from disk) - that is documented behavior, not an accident
 """
 
 from __future__ import annotations
 
 import json
 import os
+import re
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
@@ -43,10 +47,19 @@ from lc.i18n import t
 from lc.langs import DEFAULT_LANGUAGE, is_supported
 from lc.llm import LLMClient
 from lc.logutil import logger
-from lc.sites.cn import LeetCodeCnAdapter
+from lc.sites.cn import LeetCodeCnAdapter, classify_status_text
 
 LOCAL_HOSTNAMES = ("127.0.0.1", "localhost", "::1")
 DEV_ORIGINS = ("http://localhost:5173", "http://127.0.0.1:5173")
+
+_SAFE_QID_RE = re.compile(r"[A-Za-z0-9_-]+")
+
+
+def _require_safe_slug(qid: str) -> str:
+    """Reject path-traversal payloads before they reach filesystem paths."""
+    if not _SAFE_QID_RE.fullmatch(qid or ""):
+        raise HTTPException(status_code=400, detail=f"invalid problem id: {qid!r}")
+    return qid
 
 app = FastAPI(title="AlgoCoach", version=lc.__version__)
 
@@ -92,6 +105,17 @@ def get_archive() -> Archive:
         return _archive
 
 
+def reset_app_state() -> None:
+    """Drop lazily-built process singletons.
+
+    Exists so embedders/tests can re-isolate the module after the data
+    directory changes; clear_local_data uses the same dance inline.
+    """
+    global _archive
+    with _archive_lock:
+        _archive = None
+
+
 def create_adapter() -> LeetCodeCnAdapter:
     client = auth.get_http_client()
     if client is None:
@@ -117,7 +141,9 @@ def validate_cookie_standalone(cookie: str) -> dict:
 
 @app.middleware("http")
 async def local_origin_guard(request: Request, call_next):
-    host = (request.headers.get("host") or "").rsplit(":", 1)[0].lower()
+    host_header = request.headers.get("host") or ""
+    # urlparse("//[::1]:8000").hostname -> "::1"; handles bracketed IPv6
+    host = (urlparse(f"//{host_header}").hostname or "").lower()
     if host not in LOCAL_HOSTNAMES:
         return JSONResponse(
             status_code=403,
@@ -228,12 +254,14 @@ def validate_cookie(payload: CookiePayload):
 
 
 def mask_secret(value: str) -> str:
+    """Reveal only the tail: even a short prefix of a session token aids
+    correlation attacks, so nothing but the last 4 chars is ever returned."""
     value = value or ""
     if not value:
         return ""
-    if len(value) <= 12:
+    if len(value) <= 8:
         return "***"
-    return f"{value[:6]}...{value[-4:]}"
+    return f"…{value[-4:]}"
 
 
 def masked_settings(config: dict) -> dict:
@@ -245,8 +273,6 @@ def masked_settings(config: dict) -> dict:
         "llm_base_url": config.get("llm_base_url", ""),
         "llm_model": config.get("llm_model", ""),
         "default_language": config.get("default_language", DEFAULT_LANGUAGE),
-        "ui_language": config.get("ui_language", ""),
-        "theme": config.get("theme", "system"),
         "request_interval": config.get("request_interval", 2.0),
         "workspace_root": config.get("workspace_root", ""),
     }
@@ -265,10 +291,16 @@ class SettingsUpdate(BaseModel):
     llm_base_url: str | None = None
     llm_model: str | None = None
     default_language: str | None = None
-    ui_language: str | None = None
-    theme: str | None = None
     request_interval: float | None = None
     workspace_root: str | None = None
+
+
+# Politeness bounds for the leetcode.cn rate limiter: below 0.5s the pacing
+# gate is effectively off (risking site-side throttling/bans), above 60s a
+# full sync would take hours. Values outside are rejected, not clamped, so
+# typos fail loudly instead of silently reconfiguring the limiter.
+REQUEST_INTERVAL_MIN = 0.5
+REQUEST_INTERVAL_MAX = 60.0
 
 
 @app.put("/api/settings")
@@ -278,6 +310,16 @@ def update_settings(payload: SettingsUpdate):
     rebuild_needed = False
 
     updates = payload.model_dump(exclude_unset=True)
+    if "request_interval" in updates:
+        interval = float(updates["request_interval"])
+        if not REQUEST_INTERVAL_MIN <= interval <= REQUEST_INTERVAL_MAX:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"request_interval out of range "
+                    f"[{REQUEST_INTERVAL_MIN}, {REQUEST_INTERVAL_MAX}]: {interval}"
+                ),
+            )
     if "cookie" in provided and updates.get("cookie") is not None:
         from lc.auth import extract_csrf_token
 
@@ -386,12 +428,21 @@ def _default_lang() -> str:
 
 
 @app.get("/api/problem/{qid}")
-def get_problem(qid: str, refresh: int = 0):
-    return _open_or_refresh(qid, bool(refresh))
+def get_problem(qid: str):
+    _require_safe_slug(qid)
+    return _open_or_refresh(qid, False)
+
+
+@app.post("/api/problem/{qid}/refresh")
+def refresh_problem(qid: str):
+    """Force a remote refetch; POST so the side effect cannot ride on GET."""
+    _require_safe_slug(qid)
+    return _open_or_refresh(qid, True)
 
 
 @app.get("/api/problem/{qid}/template")
 def get_template(qid: str, lang: str = "cpp"):
+    _require_safe_slug(qid)
     if not is_supported(lang):
         raise HTTPException(status_code=422, detail=f"unsupported language: {lang}")
     workspace = _workspace_root()
@@ -417,6 +468,7 @@ class TestcasesPayload(BaseModel):
 
 @app.put("/api/problem/{qid}/testcases")
 def put_testcases(qid: str, payload: TestcasesPayload):
+    _require_safe_slug(qid)
     workspace = _workspace_root()
     directory = problems.find_problem_dir(workspace, qid)
     if directory is None:
@@ -432,6 +484,7 @@ class SolutionPayload(BaseModel):
 
 @app.put("/api/problem/{qid}/solution")
 def put_solution(qid: str, payload: SolutionPayload):
+    _require_safe_slug(qid)
     if not is_supported(payload.lang):
         raise HTTPException(status_code=422, detail=f"unsupported language: {payload.lang}")
     workspace = _workspace_root()
@@ -442,9 +495,11 @@ def put_solution(qid: str, payload: SolutionPayload):
     return {"slug": qid, "lang": payload.lang, "saved": True, "mtime": path.stat().st_mtime}
 
 
-def _problem_row_for(slug: str, adapter=None) -> dict:
-    cache = problems.load_problems()
-    row = next((p for p in cache["problems"] if p.get("slug") == slug), None)
+def _problem_row_for(slug: str, adapter=None, cache_rows=None) -> dict:
+    rows = cache_rows
+    if rows is None:
+        rows = problems.load_problems()["problems"]
+    row = next((p for p in rows if p.get("slug") == slug), None)
     if row is not None:
         return row
     if adapter is None:
@@ -460,8 +515,10 @@ def _problem_row_for(slug: str, adapter=None) -> dict:
         return {}
 
 
-def _archive_verdict(slug: str, lang: str, verdict: dict, adapter=None) -> dict:
-    row = _problem_row_for(slug, adapter=adapter)
+def _archive_verdict(
+    slug: str, lang: str, verdict: dict, adapter=None, cache_rows=None
+) -> dict:
+    row = _problem_row_for(slug, adapter=adapter, cache_rows=cache_rows)
     record = build_record(
         slug=slug,
         frontend_id=row.get("frontend_id", ""),
@@ -475,25 +532,29 @@ def _archive_verdict(slug: str, lang: str, verdict: dict, adapter=None) -> dict:
 
 
 def _resolve_judge_context(slug: str) -> tuple:
+    """Resolve (directory, question_id, frontend_row, cache_rows) in one pass.
+
+    The problem cache is read exactly once here; the submit path reuses
+    cache_rows for archiving instead of hitting the disk again.
+    """
+    _require_safe_slug(slug)
     workspace = _workspace_root()
     directory = problems.find_problem_dir(workspace, slug)
     if directory is None:
         raise HTTPException(status_code=404, detail=t("problem_not_found"))
     meta = problems.load_meta(directory)
     question_id = str(meta.get("internal_question_id", "") or "")
+    cache_rows = problems.load_problems()["problems"]
+    frontend_row = next((p for p in cache_rows if p.get("slug") == slug), {})
     if not question_id:
         detail = create_adapter().fetch_question_detail(slug)
         question_id = str(detail.get("internal_question_id", "") or "")
-    frontend_row = next(
-        (
-            p
-            for p in problems.load_problems()["problems"]
-            if p.get("slug") == slug
-        ),
-        {},
+    return (
+        directory,
+        question_id or str(frontend_row.get("frontend_id", "") or "") or slug,
+        frontend_row,
+        cache_rows,
     )
-    frontend_id = str(frontend_row.get("frontend_id", "") or "")
-    return directory, question_id or frontend_id or slug
 
 
 class JudgeRunPayload(BaseModel):
@@ -507,7 +568,7 @@ class JudgeRunPayload(BaseModel):
 def judge_run_endpoint(payload: JudgeRunPayload):
     if not is_supported(payload.lang):
         raise HTTPException(status_code=422, detail=f"unsupported language: {payload.lang}")
-    directory, question_id = _resolve_judge_context(payload.qid)
+    directory, question_id, _frontend_row, _cache_rows = _resolve_judge_context(payload.qid)
 
     if payload.use_local:
         testcases_path = directory / "testcases.txt"
@@ -515,12 +576,15 @@ def judge_run_endpoint(payload: JudgeRunPayload):
             testcases_path.read_text(encoding="utf-8") if testcases_path.exists() else ""
         )
     else:
+        # every stored official case participates in a remote run; the site
+        # expects all case inputs newline-concatenated under data_input
         cases_path = directory / "cases.json"
         inputs = []
         if cases_path.exists():
             try:
                 cases = json.loads(cases_path.read_text(encoding="utf-8")).get("cases", [])
-                inputs = cases[0].get("inputs", []) if cases else []
+                for case in cases:
+                    inputs.extend(case.get("inputs") or [])
             except (json.JSONDecodeError, OSError):
                 inputs = []
         input_text = "\n".join(inputs)
@@ -549,7 +613,7 @@ class JudgeSubmitPayload(BaseModel):
 def judge_submit_endpoint(payload: JudgeSubmitPayload):
     if not is_supported(payload.lang):
         raise HTTPException(status_code=422, detail=f"unsupported language: {payload.lang}")
-    directory, question_id = _resolve_judge_context(payload.qid)
+    directory, question_id, _frontend_row, cache_rows = _resolve_judge_context(payload.qid)
     problems.save_solution(directory, payload.lang, payload.code)
     adapter = create_adapter()
     verdict = judge.judge_submit(
@@ -560,7 +624,9 @@ def judge_submit_endpoint(payload: JudgeSubmitPayload):
         lang=payload.lang,
     )
     verdict["mode"] = "submit"
-    record = _archive_verdict(payload.qid, payload.lang, verdict, adapter=adapter)
+    _archive_verdict(
+        payload.qid, payload.lang, verdict, adapter=adapter, cache_rows=cache_rows
+    )
     verdict["archived"] = True
     return verdict
 
@@ -701,25 +767,6 @@ class ImportSitePayload(BaseModel):
     limit: int = 20
 
 
-_STATUS_TEXT_RULES = (
-    ("accept", "accepted"),
-    ("wrong", "wrong_answer"),
-    ("compile", "compile_error"),
-    ("runtime", "runtime_error"),
-    ("time limit", "tle"),
-    ("memory limit", "mle"),
-    ("output limit", "ole"),
-)
-
-
-def _classify_site_status(text: str) -> str:
-    lowered = (text or "").lower()
-    for marker, key in _STATUS_TEXT_RULES:
-        if marker in lowered:
-            return key
-    return "other"
-
-
 @app.post("/api/archive/import-site")
 def import_site(payload: ImportSitePayload):
     adapter = create_adapter()
@@ -741,7 +788,9 @@ def import_site(payload: ImportSitePayload):
             frontend_id=row.get("frontend_id", item.get("frontend_id", "")),
             submission_id=item["submission_id"],
             lang=item.get("lang", ""),
-            verdict={"status_key": _classify_site_status(item.get("status", ""))},
+            # same classifier as judge results; unmatched text lands on
+            # "other" so it stays visible but never inflates solved stats
+            verdict={"status_key": classify_status_text(item.get("status")) or "other"},
             problem_row=row,
         )
         if item.get("timestamp", "").isdigit():
@@ -806,20 +855,28 @@ def spa_fallback(full_path: str):
 
     if DIST_DIR is not None:
         dist_root = DIST_DIR.resolve()
-        requested = (dist_root / full_path.lstrip("/")).resolve() if full_path else None
-        if requested is not None and requested.is_file():
-            if str(requested).startswith(str(dist_root)):
-                immutable = "/assets/" in full_path
-                return FileResponse(
-                    requested,
-                    headers={
-                        "Cache-Control": (
-                            "public, max-age=31536000, immutable"
-                            if immutable
-                            else "no-cache"
-                        )
-                    },
-                )
+        served = None
+        if full_path:
+            candidate = (dist_root / full_path.lstrip("/")).resolve()
+            try:
+                candidate.relative_to(dist_root)
+                inside = True
+            except ValueError:
+                inside = False
+            if inside and candidate.is_file():
+                served = candidate
+        if served is not None:
+            immutable = "/assets/" in full_path
+            return FileResponse(
+                served,
+                headers={
+                    "Cache-Control": (
+                        "public, max-age=31536000, immutable"
+                        if immutable
+                        else "no-cache"
+                    )
+                },
+            )
         index = dist_root / "index.html"
         if index.is_file():
             return FileResponse(index, headers={"Cache-Control": "no-cache"})

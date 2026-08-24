@@ -8,7 +8,18 @@
 - **内部 question_id ≠ 前端题号**：frontendQuestionId 可能非纯数字（如「剑指 Offer 03」「面试题 17.16」「LCP 07」，含空格与中文）。规范键一律用 slug；题号全数字时目录命名 `0001-two-sum/`，否则直接用 slug。
 - **UA 风控**：使用真实浏览器 UA。
 - **每日一题时区**：以 00:00 UTC+8 为界。
-- **自定义用例输入序列化格式**：testcases.txt 与远程 interpret 接口的输入格式转换需注意（实现时验证并在此记录）。
+- **自定义用例输入序列化格式【已真网回填】**：cn 站调试运行接口的自定义用例字段是
+  `data_input`，多组用例直接换行拼接（浏览器同款）；官方示例应从详情的
+  `exampleTestcases`（JSON 编码字符串数组，每个元素是一组完整输入）解码为多条 case，
+  仅在缺失时回退单个 `sampleTestCase`，否则同一用例会被存两遍。曾因误用 `input` 字段名
+  触发站点 Internal Error。
+- **同步引擎的续传语义只属于失败态**：`SyncEngine` 的页游标与已拉取行若在任何启动时都保留，
+  「上次成功同步后再点同步」会从末页续传、立即空页退出——站点新增题目直到重启进程都不可见。
+  正确语义：仅当上一次运行失败且存在半程数据时才续传；成功后（或从未运行）必须全新全量。
+  （2026-08-23 已修复并附回归测试）
+- **题目目录定位禁止字符串后缀匹配**：目录命名约定是 `<digits>-<slug>` 或裸 `<slug>`；
+  用 `endswith("-{slug}")` 扫描会让短 slug（如 `sum`）劫持长目录（如 `0001-two-sum`），
+  把读写判题落到别的题目工作区。必须按约定正则解析后精确比对。（2026-08-23 已修复）
 - **GraphQL 字段名【已真网回填 2026-08-23】**：cn 站实测确认——
   - 题库列表：顶层 `problemsetQuestionList(categorySlug, limit, skip, filters)` 直接调用（**不存在**底层 `questionList` 字段）；行节点是 `QuestionLightNode`，字段为 `acRate / difficulty / title / titleCn / titleSlug / paidOnly / frontendQuestionId / topicTags { slug name nameTranslated }`（CommonTagNode）；**没有** `isPaidOnly`、`categoryTitle`、`translatedTitle`、`questionFrontendId`
   - 题目详情：`question(titleSlug:)` 节点用 `translatedTitle`（**无 `titleCn`**），标签节点是 `TopicTagNode` 用 `translatedName`，含 `exampleTestcases` 与内部 `questionId`（判定接口必需）
@@ -31,7 +42,8 @@
 - 403
 - 302 重定向到登录页
 - **200 + errors 载荷**：cn 站 GraphQL 会话过期常返回 200 + errors（认证失败信号），只看状态码会漏检。
-- 实测形态清单待真网 integration 验证后回填。
+- 三形态已由 `tests/test_integration_live.py` 覆盖真网回归（需 `ALGOCOACH_TEST_COOKIE`，
+  手动 `pytest -m integration` 运行）。
 
 ## 重试纪律
 
@@ -54,6 +66,12 @@
   按方法分级——POST/PUT 等 state-changing 方法强制白名单 Origin（同源 fetch POST 也带
   Origin，不影响正常使用），仅 GET 允许缺失 Origin + Host 校验兜底。
 - **多标签页同题双编辑**：接受 last-write-wins（localStorage 快照恢复仅覆盖「下次打开」场景）。
+- **前端 i18n 缺键是静默的**：`t()` 找不到键时原样返回 key 字符串，界面会出现「cookie_invalid」
+  这类裸键且无报错。新增服务端 `message_key` 或界面文案时，必须确认 zh/en 两份 catalog 都有
+  对应条目（auth 横幅曾因此长期显示裸键）。
+- **错误文案语言以 UI 语言为准**：服务端错误 payload 只保证 `message_key` 稳定，`message`
+  文本跟随后端进程 locale；前端必须在 api 层集中按 message_key 翻译后再展示，
+  各视图自行取 `error.message` 会导致中英混杂。
 - **双 coach 实例并存**：由单实例守卫杜绝（绑定失败探测拒启 + instance.lock 锁文件封堵
   「端口顺延后新实例直接绑成功」盲区）；锁仅用于实例互斥而非数据文件加锁。若守卫被绕过仍按
   jsonl 单次小写入（O_APPEND 级别）接受 last-wins。

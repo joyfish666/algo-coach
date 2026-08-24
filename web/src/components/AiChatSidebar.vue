@@ -1,5 +1,5 @@
 <script setup>
-import { nextTick, onBeforeUnmount, ref } from 'vue'
+import { nextTick, onBeforeUnmount, ref, watch } from 'vue'
 
 import { api } from '../api'
 import { useI18nStore } from '../stores/i18n'
@@ -11,8 +11,6 @@ const props = defineProps({
 const i18n = useI18nStore()
 
 const POS_KEY = 'algocoach-ai-pos'
-const PANEL_WIDTH = 340
-const PANEL_HEIGHT = 520
 
 const open = ref(false)
 const messages = ref([])
@@ -35,8 +33,12 @@ const pos = ref(readPos())
 let dragOffset = null
 
 function clamp(x, y) {
-  const maxX = window.innerWidth - PANEL_WIDTH - 8
-  const maxY = window.innerHeight - PANEL_HEIGHT + 120
+  // measure the live panel instead of hardcoding its CSS size, so style and
+  // logic can never drift apart when the layout changes
+  const width = panelEl.value?.offsetWidth || 340
+  const height = panelEl.value?.offsetHeight || 520
+  const maxX = window.innerWidth - width - 8
+  const maxY = window.innerHeight - height + 120
   return {
     x: Math.min(Math.max(8, x), Math.max(8, maxX)),
     y: Math.min(Math.max(8, y), Math.max(8, maxY)),
@@ -47,9 +49,10 @@ function startDrag(event) {
   if (event.target.closest('.close')) return
   event.preventDefault()
   const rect = panelEl.value?.getBoundingClientRect()
+  const fallbackWidth = rect?.width || 340
   const current = rect
     ? { x: rect.left, y: rect.top }
-    : { x: window.innerWidth - PANEL_WIDTH - 24, y: 24 }
+    : { x: window.innerWidth - fallbackWidth - 24, y: 24 }
   dragOffset = { dx: event.clientX - current.x, dy: event.clientY - current.y }
   document.body.style.userSelect = 'none'
   window.addEventListener('mousemove', onDragMove)
@@ -76,6 +79,18 @@ onBeforeUnmount(() => {
   if (dragOffset) endDrag()
 })
 
+// the workbench component is reused across /problem/:qid navigations, so a
+// qid change would otherwise keep the previous problem's conversation here
+// and leak it into the next problem's LLM context
+watch(
+  () => props.qid,
+  () => {
+    messages.value = []
+    pending.value = false
+    draft.value = ''
+  }
+)
+
 async function toggle() {
   open.value = !open.value
 }
@@ -91,26 +106,33 @@ function scrollToEnd() {
 async function send() {
   const question = draft.value.trim()
   if (!question || pending.value) return
+  const askedQid = props.qid
   draft.value = ''
   messages.value.push({ role: 'user', content: question })
   pending.value = true
   scrollToEnd()
   try {
-    const history = messages.value.slice(-13, -1).map((m) => ({
-      role: m.role,
-      content: m.content,
-    }))
-    const data = await api.ask({ question, history, qid: props.qid })
+    // error bubbles are UI feedback, not conversation turns; feeding them
+    // back as assistant messages would poison the model's context
+    const history = messages.value
+      .filter((m) => !m.error)
+      .slice(-13, -1)
+      .map((m) => ({ role: m.role, content: m.content }))
+    const data = await api.ask({ question, history, qid: askedQid })
+    if (askedQid !== props.qid) return // user switched problems meanwhile
     messages.value.push({ role: 'assistant', content: data.answer })
   } catch (err) {
+    if (askedQid !== props.qid) return
     const message =
       (err.payload && err.payload.detail) ||
       (err.payload && err.payload.error && err.payload.error.message) ||
       err.message
     messages.value.push({ role: 'assistant', content: `⚠️ ${message}`, error: true })
   } finally {
-    pending.value = false
-    scrollToEnd()
+    if (askedQid === props.qid) {
+      pending.value = false
+      scrollToEnd()
+    }
   }
 }
 

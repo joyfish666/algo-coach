@@ -1,4 +1,16 @@
 import { debugEnabled, debugLog } from './debug'
+import { useI18nStore } from './stores/i18n'
+
+function translateMessageKey(key) {
+  if (!key) return null
+  try {
+    const translated = useI18nStore().t(key)
+    // an untranslated key echoes itself; keep the raw server text as fallback
+    return translated !== key ? translated : null
+  } catch {
+    return null
+  }
+}
 
 async function handle(response) {
   if (!response.ok) {
@@ -16,7 +28,11 @@ async function handle(response) {
         new CustomEvent('algocoach:auth-expired', { detail: payload.error })
       )
     }
+    // single point where server error payloads become user-visible text:
+    // prefer the localized message_key so wording follows the UI language
+    // instead of the backend process locale
     const message =
+      translateMessageKey(payload?.error?.message_key) ||
       (payload && payload.error && payload.error.message) ||
       (typeof payload?.detail === 'string' ? payload.detail : null) ||
       `HTTP ${response.status}`

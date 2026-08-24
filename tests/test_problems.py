@@ -3,7 +3,7 @@ import json
 import pytest
 
 from lc import problems
-from lc.exceptions import NetworkError, PremiumProblemError
+from lc.exceptions import NetworkError
 
 
 # ---------------------------------------------------------------------------
@@ -33,6 +33,28 @@ def test_html_list_items():
     md = problems.html_to_markdown(html)
     assert "- first" in md
     assert "- second" in md
+
+
+def test_html_ordered_list_numbers_items():
+    html = "<ol><li>one</li><li>two</li><li>three</li></ol>"
+    lines = [line for line in problems.html_to_markdown(html).splitlines() if line.strip()]
+    assert lines == ["1. one", "2. two", "3. three"]
+
+
+def test_html_nested_ordered_lists_restart_numbering():
+    html = "<ol><li>a<ol><li>x</li><li>y</li></ol></li><li>b</li></ol>"
+    md = problems.html_to_markdown(html)
+    assert "1. a" in md
+    assert "1. x" in md
+    assert "2. y" in md
+    assert "2. b" in md
+
+
+def test_html_table_cells_keep_separator():
+    html = "<table><tr><td>a</td><td>b</td></tr><tr><td>c</td><td>d</td></tr></table>"
+    md = problems.html_to_markdown(html)
+    assert "a | b" in md
+    assert "c | d" in md
 
 
 def test_html_formula_superscript_stays_raw():
@@ -79,6 +101,51 @@ def test_load_problems_missing_cache(tmp_path):
     payload = problems.load_problems(tmp_path / "none.json")
     assert payload["problems"] == []
     assert payload["total"] == 0
+
+
+def test_find_problem_dir_rejects_suffix_collision(tmp_path):
+    """Regression: slug 'sum' must not hijack the '0001-two-sum' directory -
+    matching parses the '<digits>-<slug>' convention instead of endswith."""
+    problems_dir = tmp_path / "problems" / "0001-two-sum"
+    problems_dir.mkdir(parents=True)
+    assert problems.find_problem_dir(tmp_path, "two-sum") == problems_dir
+    assert problems.find_problem_dir(tmp_path, "sum") is None
+
+
+def test_find_problem_dir_matches_prefixed_and_plain_dirs(tmp_path):
+    prefixed = tmp_path / "problems" / "0007-reverse-integer"
+    plain = tmp_path / "problems" / "shu-zu-lcof"
+    prefixed.mkdir(parents=True)
+    plain.mkdir(parents=True)
+    assert problems.find_problem_dir(tmp_path, "reverse-integer") == prefixed
+    assert problems.find_problem_dir(tmp_path, "shu-zu-lcof") == plain
+    assert problems.find_problem_dir(tmp_path, "missing") is None
+
+
+def test_build_cases_payload_uses_example_testcases():
+    detail = {
+        "sample_test_case": "[2,7,11,15]\n9",
+        "example_test_cases": ["[2,7,11,15]\n9", "[3,2,4]\n6"],
+    }
+    payload = problems.build_cases_payload(detail)
+    assert [case["inputs"] for case in payload["cases"]] == [
+        ["[2,7,11,15]", "9"],
+        ["[3,2,4]", "6"],
+    ]
+
+
+def test_build_cases_payload_falls_back_to_sample():
+    payload = problems.build_cases_payload({"sample_test_case": "a\nb"})
+    assert len(payload["cases"]) == 1
+    assert payload["cases"][0]["inputs"] == ["a", "b"]
+    assert problems.build_cases_payload({})["cases"] == []
+
+
+def test_problem_dir_for_honors_configured_workspace_root(tmp_path, monkeypatch):
+    monkeypatch.setenv("ALGOCOACH_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("ALGOCOACH_WORKSPACE_ROOT", str(tmp_path / "custom"))
+    directory = problems.problem_dir_for({"slug": "two-sum", "frontend_id": "1"})
+    assert directory == tmp_path / "custom" / "problems" / "0001-two-sum"
 
 
 def test_upsert_summary_into_cache_self_heal(tmp_path):
@@ -211,6 +278,67 @@ def test_sync_engine_unsupported_category_marked(tmp_path):
     engine.run_blocking(adapter, cache)
     payload = problems.load_problems(cache)
     assert payload["problems"][0]["supported"] is False
+
+
+def test_sync_engine_unknown_total_does_not_truncate_after_page_one(tmp_path):
+    """Regression: a missing site 'total' used to fall back to the current
+    page's row count, silently ending the sync after one page."""
+    pages = [
+        [make_row(i) for i in range(100)],
+        [make_row(100 + i) for i in range(50)],
+    ]
+    adapter = FakePageAdapter(pages, total=None)
+    engine = problems.SyncEngine()
+    cache = tmp_path / "problems.json"
+    engine.run_blocking(adapter, cache)
+
+    assert adapter.calls == [0, 100]
+    payload = problems.load_problems(cache)
+    assert payload["total"] == 150
+    assert engine.progress()["fetched"] == 150
+    assert engine.progress()["error"] is None
+
+
+def test_sync_engine_refetches_everything_after_completed_sync(tmp_path):
+    """Regression: a second sync used to resume past the final page and
+    terminate instantly, so problems added on the site were invisible until
+    process restart. Resume must apply only after a FAILED run."""
+    pages = {0: [make_row(i) for i in range(2)]}
+    state = {"total": 2}
+
+    class LiveSite:
+        def fetch_problem_list_page(self, skip, limit):
+            rows = pages.get(skip // limit, [])
+            return {"total": state["total"], "problems": rows}
+
+    engine = problems.SyncEngine()
+    cache = tmp_path / "problems.json"
+    engine.run_blocking(LiveSite(), cache)
+    assert engine.progress()["fetched"] == 2
+    assert engine.progress()["resumable"] is False
+
+    # the site gains a problem; a fresh manual sync must pick it up
+    pages[0].append(make_row(3))
+    state["total"] = 3
+    engine.run_blocking(LiveSite(), cache)
+
+    progress = engine.progress()
+    assert progress["error"] is None
+    assert progress["fetched"] == 3
+    assert [row["slug"] for row in problems.load_problems(cache)["problems"]][-1] == "problem-3"
+
+
+def test_progress_resumable_only_after_failure(tmp_path):
+    adapter = FakePageAdapter(
+        [[make_row(i) for i in range(100)], [make_row(i) for i in range(1)]],
+        total=101,
+        fail_on_page=1,
+    )
+    engine = problems.SyncEngine()
+    cache = tmp_path / "problems.json"
+    engine.run_blocking(adapter, cache)
+    assert engine.progress()["error"] == "boom on page"
+    assert engine.progress()["resumable"] is True
 
 
 # ---------------------------------------------------------------------------

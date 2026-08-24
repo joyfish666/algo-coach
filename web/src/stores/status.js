@@ -1,5 +1,7 @@
 import { defineStore } from 'pinia'
 
+import { api } from '../api'
+
 export const useStatusStore = defineStore('status', {
   state: () => ({
     loaded: false,
@@ -12,9 +14,7 @@ export const useStatusStore = defineStore('status', {
   actions: {
     async refresh() {
       try {
-        const response = await fetch('/api/status')
-        if (!response.ok) throw new Error(`HTTP ${response.status}`)
-        const data = await response.json()
+        const data = await api.getStatus()
         this.configured = Boolean(data.configured)
         this.version = data.version || ''
         this.dataDir = data.data_dir || ''

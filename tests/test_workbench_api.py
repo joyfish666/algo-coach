@@ -143,8 +143,23 @@ def test_run_with_local_custom_testcases(client, monkeypatch):
     assert adapter.runs[0]["input"] == "[5,5]\n10"
 
 
+def test_run_merges_all_official_example_cases(client, monkeypatch):
+    """Regression: only cases[0] used to be sent; every official example must
+    participate in a remote run (inputs newline-concatenated, site parity)."""
+    detail = DETAIL_FIXTURE.copy()
+    detail["example_test_cases"] = ["[2,7,11,15]\n9", "[3,2,4]\n6"]
+    adapter = open_problem(client, monkeypatch, FakeJudgeAdapter(detail=detail))
+    response = client.post(
+        "/api/judge/run",
+        json={"qid": "two-sum", "lang": "cpp", "code": "x", "use_local": False},
+        headers=ORIGIN,
+    )
+    assert response.status_code == 200
+    assert adapter.runs[0]["input"] == "[2,7,11,15]\n9\n[3,2,4]\n6"
+
+
 def test_submit_long_poll_returns_final(client, monkeypatch):
-    adapter = open_problem(client, monkeypatch)
+    open_problem(client, monkeypatch)
     response = client.post(
         "/api/judge/submit",
         json={"qid": "two-sum", "lang": "cpp", "code": "class S {};"},

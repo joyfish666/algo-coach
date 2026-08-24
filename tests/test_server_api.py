@@ -114,7 +114,6 @@ def test_settings_roundtrip_masks_secrets_and_rebuilds_session(client):
         json={
             "cookie": "csrftoken=tok123; LEETCODE_SESSION=sessionvalue123456",
             "llm_api_key": "sk-abcdef123456",
-            "theme": "dark",
         },
         headers=ORIGIN,
     )
@@ -123,13 +122,28 @@ def test_settings_roundtrip_masks_secrets_and_rebuilds_session(client):
     assert body["configured"] is True
     assert "sessionvalue123456" not in body["cookie_masked"]
     assert "sk-abcdef123456" not in body["llm_api_key_masked"]
-    assert body["theme"] == "dark"
+    # only the tail may leak, never a usable prefix
+    assert not body["llm_api_key_masked"].startswith("sk-abcd")
+    assert "theme" not in body
+    assert "ui_language" not in body
 
     session = auth.get_session()
     assert session.cookies.get("csrftoken") == "tok123"
 
     fetched = client.get("/api/settings").json()
     assert fetched["configured"] is True
+
+
+def test_settings_reject_out_of_range_request_interval(client):
+    seed_config()
+    for bad in (0.0, 0.1, 61.0, -2.0):
+        response = client.put(
+            "/api/settings", json={"request_interval": bad}, headers=ORIGIN
+        )
+        assert response.status_code == 422, bad
+    ok = client.put("/api/settings", json={"request_interval": 1.5}, headers=ORIGIN)
+    assert ok.status_code == 200
+    assert ok.json()["request_interval"] == 1.5
 
 
 def test_validate_cookie_endpoint_success(client, monkeypatch):
@@ -297,14 +311,55 @@ def test_open_problem_materializes_and_serves_offline(client, monkeypatch):
     assert any(row["slug"] == "two-sum" for row in problems_cache["problems"])
 
 
-def test_refresh_refetches_detail(client, monkeypatch):
+def test_post_refresh_refetches_detail(client, monkeypatch):
     adapter = FakeAdapter(detail=DETAIL_FIXTURE)
     monkeypatch.setattr(api_module, "create_adapter", lambda: adapter)
     client.get("/api/problem/two-sum")
-    refreshed = client.get("/api/problem/two-sum?refresh=1")
+    refreshed = client.post("/api/problem/two-sum/refresh", headers=ORIGIN)
     assert refreshed.status_code == 200
     detail_calls = [call for call in adapter.calls if call[0] == "detail"]
     assert len(detail_calls) == 2
+
+
+def test_get_refresh_query_no_longer_triggers_fetch(client, monkeypatch):
+    """GET is side-effect free now: ?refresh=1 must not refetch remotely."""
+    adapter = FakeAdapter(detail=DETAIL_FIXTURE)
+    monkeypatch.setattr(api_module, "create_adapter", lambda: adapter)
+    client.get("/api/problem/two-sum")
+    response = client.get("/api/problem/two-sum?refresh=1")
+    assert response.status_code == 200
+    detail_calls = [call for call in adapter.calls if call[0] == "detail"]
+    assert len(detail_calls) == 1
+
+
+def test_require_safe_slug_rejects_traversal_payloads():
+    from fastapi import HTTPException
+
+    for bad in ["..", "../solution", r"..\..\target", "a/b", ".hidden", "%2e%2e", "", None]:
+        with pytest.raises(HTTPException) as excinfo:
+            api_module._require_safe_slug(bad)
+        assert excinfo.value.status_code == 400
+    assert api_module._require_safe_slug("two-sum") == "two-sum"
+
+
+def test_get_problem_rejects_traversal_qid_over_http(client):
+    # %5C survives httpx untouched and decodes to a single-segment backslash
+    response = client.get("/api/problem/a%5Cb")
+    assert response.status_code == 400
+
+
+def test_put_solution_rejects_windows_traversal_qid(client):
+    response = client.put(
+        "/api/problem/a%5Cb/solution",
+        json={"lang": "cpp", "code": "x"},
+        headers=ORIGIN,
+    )
+    assert response.status_code == 400
+
+
+def test_host_guard_accepts_ipv6_loopback(client):
+    response = client.get("/api/status", headers={"Host": "[::1]:8000"})
+    assert response.status_code == 200
 
 
 def test_template_on_demand_then_exists(client, monkeypatch):
@@ -366,3 +421,21 @@ def test_unknown_problem_returns_404(client, monkeypatch):
     monkeypatch.setattr(api_module, "create_adapter", factory)
     response = client.get("/api/problem/does-not-exist")
     assert response.status_code == 404
+
+
+def test_spa_fallback_never_serves_sibling_of_dist(tmp_path, monkeypatch):
+    """Regression: 'dist-old/x' passed the old startswith('...dist') check."""
+    dist = tmp_path / "dist"
+    dist.mkdir()
+    (dist / "index.html").write_text("<html>spa</html>", encoding="utf-8")
+    sibling_file = tmp_path / "dist-old" / "secret.txt"
+    sibling_file.parent.mkdir()
+    sibling_file.write_text("secret", encoding="utf-8")
+    monkeypatch.setattr(api_module, "DIST_DIR", dist)
+
+    escaped = api_module.spa_fallback("../dist-old/secret.txt")
+    assert str(sibling_file) not in str(getattr(escaped, "path", ""))
+    assert str(dist / "index.html") == str(getattr(escaped, "path", ""))
+
+    normal = api_module.spa_fallback("index.html")
+    assert str(dist / "index.html") == str(getattr(normal, "path", ""))

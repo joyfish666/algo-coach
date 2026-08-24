@@ -36,11 +36,13 @@ DEFAULTS = {
     "llm_model": "",
     "llm_timeout": 120.0,
     "default_language": "cpp",
-    "ui_language": "",
-    "theme": "system",
     "request_interval": 2.0,
     "workspace_root": "",
 }
+
+# Note on UI preferences (theme / interface language): they are browser-side
+# concerns persisted in localStorage by the web app. They deliberately do NOT
+# live here - duplicating them created dead config keys nothing consumed.
 
 ENV_OVERRIDES = {
     "cookie": "ALGOCOACH_COOKIE",
@@ -49,8 +51,6 @@ ENV_OVERRIDES = {
     "llm_model": "ALGOCOACH_LLM_MODEL",
     "llm_timeout": "ALGOCOACH_LLM_TIMEOUT",
     "default_language": "ALGOCOACH_DEFAULT_LANGUAGE",
-    "ui_language": "ALGOCOACH_UI_LANGUAGE",
-    "theme": "ALGOCOACH_THEME",
     "request_interval": "ALGOCOACH_REQUEST_INTERVAL",
     "workspace_root": "ALGOCOACH_WORKSPACE_ROOT",
 }

@@ -33,8 +33,20 @@ const syncTotal = ref(null)
 const syncMessage = ref('')
 const syncErrorText = ref('')
 let pollTimer = null
+let pollFailures = 0
+const POLL_MAX_FAILURES = 5
 
 const tagOptions = computed(() => collectTags(problems.value))
+
+const filtered = computed(() =>
+  filterProblems(problems.value, {
+    keyword: keyword.value,
+    difficulty: difficulty.value,
+    tagSlug: tagSlug.value,
+  })
+)
+
+const paged = computed(() => paginate(sortByMode(filtered.value, sortMode.value), page.value, PAGE_SIZE))
 
 function applyRouteQuery() {
   if (route.path !== '/problems') return
@@ -47,23 +59,8 @@ function applyRouteQuery() {
 
 watch(() => route.fullPath, applyRouteQuery, { immediate: true })
 
-watch(keyword, () => (page.value = 1))
-watch(difficulty, () => (page.value = 1))
-watch(tagSlug, () => (page.value = 1))
-
-const filtered = computed(() =>
-  filterProblems(problems.value, {
-    keyword: keyword.value,
-    difficulty: difficulty.value,
-    tagSlug: tagSlug.value,
-  })
-)
-
-const paged = computed(() => paginate(sortByMode(filtered.value, sortMode.value), page.value, PAGE_SIZE))
-
-watch(keyword, () => (page.value = 1))
-watch(difficulty, () => (page.value = 1))
-watch(tagSlug, () => (page.value = 1))
+// any filter/sort change restarts pagination
+watch([keyword, difficulty, tagSlug, sortMode], () => (page.value = 1))
 
 async function loadProblems() {
   loadingList.value = true
@@ -111,6 +108,7 @@ async function startSync() {
 async function pollSyncProgress() {
   try {
     const progress = await api.getSyncProgress()
+    pollFailures = 0
     syncFetched.value = progress.fetched || 0
     syncTotal.value = progress.total ?? null
     if (!progress.running) {
@@ -127,7 +125,15 @@ async function pollSyncProgress() {
       status.refresh()
     }
   } catch {
-    /* transient polling failure; keep trying until interval cleared */
+    // bounded retry budget: without it a persistently failing endpoint keeps
+    // the UI in "syncing" forever (e.g. backend restarted mid-sync)
+    pollFailures += 1
+    if (pollFailures >= POLL_MAX_FAILURES) {
+      clearInterval(pollTimer)
+      pollTimer = null
+      syncing.value = false
+      syncErrorText.value = i18n.t('sync_lost')
+    }
   }
 }
 

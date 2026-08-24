@@ -112,6 +112,41 @@ def test_fetch_problem_list_missing_payload_raises():
         adapter.fetch_problem_list_page(0, 10)
 
 
+def test_fetch_problem_list_page_total_missing_is_none():
+    payload = {
+        "data": {
+            "problemsetQuestionList": {
+                "questions": [
+                    {"frontendQuestionId": "1", "titleSlug": "two-sum", "title": "Two Sum"}
+                ]
+            }
+        }
+    }
+    adapter, _ = adapter_with([payload])
+    page = adapter.fetch_problem_list_page(skip=0, limit=50)
+    # must NOT impersonate len(problems): sync would truncate after page 1
+    assert page["total"] is None
+    assert len(page["problems"]) == 1
+
+
+@pytest.mark.parametrize("bad_slug", ["../../evil", "..\\..\\evil", "a/b", "..", "", "two sum"])
+def test_normalize_problem_row_rejects_unsafe_slug(bad_slug):
+    raw = {"frontendQuestionId": "1", "titleSlug": bad_slug, "title": "x"}
+    with pytest.raises(NetworkError):
+        normalize_problem_row(raw)
+
+
+def test_normalize_question_detail_rejects_unsafe_slug():
+    raw = {
+        "frontendQuestionId": "1",
+        "titleSlug": "../../escape",
+        "title": "x",
+        "translatedContent": "<p>stmt</p>",
+    }
+    with pytest.raises(NetworkError):
+        normalize_question_detail(raw)
+
+
 def test_normalize_problem_row_requires_slug():
     with pytest.raises(NetworkError):
         normalize_problem_row({"frontendQuestionId": "9"})
@@ -218,6 +253,48 @@ def test_normalize_question_detail_direct():
     detail = normalize_question_detail(raw)
     assert detail["frontend_id"] == "LCP 07"
     assert detail["paid_only"] is False
+
+
+def test_normalize_question_detail_decodes_example_testcases():
+    import json as json_module
+
+    raw = {
+        "titleSlug": "a",
+        "difficulty": "EASY",
+        "translatedContent": "<p>题面</p>",
+        "sampleTestCase": "[2,7,11,15]\n9",
+        "exampleTestcases": json_module.dumps(["[2,7,11,15]\n9", "[3,2,4]\n6"]),
+    }
+    detail = normalize_question_detail(raw)
+    assert detail["example_test_cases"] == ["[2,7,11,15]\n9", "[3,2,4]\n6"]
+
+
+def test_parse_example_testcases_degrades_gracefully():
+    from lc.sites.cn import parse_example_testcases
+
+    assert parse_example_testcases(None) == []
+    assert parse_example_testcases("") == []
+    assert parse_example_testcases("[1]\n2") == ["[1]\n2"]  # non-JSON: single block
+    assert parse_example_testcases('["a\\nb"]') == ["a\nb"]
+    assert parse_example_testcases('"just a string"') == ['"just a string"']
+
+
+def test_classify_status_text_single_source():
+    """The import path and the judge path must share one classifier."""
+    from lc.sites.cn import classify_status_text
+
+    assert classify_status_text("Accepted") == "accepted"
+    assert classify_status_text("wrong answer") == "wrong_answer"
+    assert classify_status_text("Compile Error") == "compile_error"
+    assert classify_status_text("Runtime Error") == "runtime_error"
+    assert classify_status_text("Time Limit Exceeded") == "tle"
+    assert classify_status_text("Memory Limit Exceeded") == "mle"
+    assert classify_status_text("Output Limit Exceeded") == "ole"
+    # regression: the old api-layer copy lacked this rule and imported
+    # internal errors as "other"
+    assert classify_status_text("Internal Error") == "internal_error"
+    assert classify_status_text("") == ""
+    assert classify_status_text(None) == ""
 
 
 def test_normalize_site_submission_extracts_slug_from_url():

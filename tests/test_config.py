@@ -1,4 +1,3 @@
-import json
 
 import pytest
 
@@ -15,7 +14,6 @@ def test_load_returns_defaults_when_missing(cfg_path):
     assert data["schema_version"] == config.SCHEMA_VERSION
     assert data["cookie"] == ""
     assert data["default_language"] == "cpp"
-    assert data["theme"] == "system"
     assert data["request_interval"] == 2.0
 
 
@@ -26,16 +24,31 @@ def test_save_load_roundtrip(cfg_path):
             "cookie": "LEETCODE_SESSION=abc; csrftoken=tok",
             "llm_api_key": "sk-test",
             "request_interval": 3.5,
-            "ui_language": "en",
         }
     )
     config.save(payload, cfg_path)
     loaded = config.load(cfg_path)
-    for key in ("cookie", "llm_api_key", "request_interval", "ui_language"):
+    for key in ("cookie", "llm_api_key", "request_interval"):
         assert loaded[key] == payload[key]
     assert loaded["schema_version"] == config.SCHEMA_VERSION
     text = cfg_path.read_text(encoding="utf-8")
     assert "schema_version" in text
+
+
+def test_legacy_ui_pref_keys_are_ignored_not_rejected(cfg_path):
+    """theme/ui_language were removed as dead keys (browser localStorage owns
+    them); old config files carrying them must load cleanly and be dropped on
+    the next save instead of crashing or resurrecting the settings."""
+    raw = dict(config.DEFAULTS)
+    raw["theme"] = "dark"
+    raw["ui_language"] = "en"
+    cfg_path.write_text(config.dump_toml(raw), encoding="utf-8")
+    loaded = config.load(cfg_path)
+    assert "theme" not in loaded
+    assert "ui_language" not in loaded
+    config.save(loaded, cfg_path)
+    reloaded = config.load(cfg_path)
+    assert "theme" not in reloaded
 
 
 def test_save_is_atomic_and_leaves_no_tmp_files(cfg_path):

@@ -2,9 +2,11 @@
 
 Responsibilities:
 - paged full problem-list fetch into problems.json with atomic writes;
-  in-process resume semantics: a failed page keeps accumulated rows so a
-  retry continues from the last completed page, while a process restart
-  starts a fresh full sync
+  resume semantics apply ONLY after a failed run: the retry continues from
+  the last completed page. A sync requested after a completed (or never
+  started) run is a fresh full sync - otherwise a finished engine would
+  resume past the final page and silently no-op, hiding newly added
+  problems until process restart
 - slug / frontendQuestionId uniqueness validation during sync; anomalies are
   logged and skipped without aborting
 - non-algorithm categories (SQL database etc.) are kept but marked
@@ -55,7 +57,8 @@ class _HTMLToMarkdown(HTMLParser):
         self.blocks = []
         self.buf = []
         self.pending_prefix = ""
-        self.list_stack = []
+        self.list_stack = []  # entries: {"ordered": bool, "n": int}
+        self.in_table = False
         self.pre_lines = None
         self.pre_language = ""
         self.link_stack = []
@@ -93,12 +96,16 @@ class _HTMLToMarkdown(HTMLParser):
             return
         if tag in ("ul", "ol"):
             self.flush_block()
-            self.list_stack.append(tag)
+            self.list_stack.append({"ordered": tag == "ol", "n": 0})
             return
         if tag == "li":
             self.flush_block()
-            marker = "- " if (self.list_stack or ["ul"])[-1] == "ul" else "1. "
-            self.buf.append(marker)
+            level = self.list_stack[-1] if self.list_stack else {"ordered": False, "n": 0}
+            if level["ordered"]:
+                level["n"] += 1
+                self.buf.append(f"{level['n']}. ")
+            else:
+                self.buf.append("- ")
             return
         if tag in self._HEADINGS:
             self.flush_block()
@@ -115,6 +122,15 @@ class _HTMLToMarkdown(HTMLParser):
             return
         if tag == "sup":
             self.buf.append("^")
+            return
+        if tag in ("td", "th"):
+            # keep cells distinguishable when the statement carries a table
+            if self.buf and self.in_table:
+                self.buf.append(" | ")
+            return
+        if tag == "table":
+            self.flush_block()
+            self.in_table = True
             return
         if tag == "a":
             href = self._attr(attrs, "href") or ""
@@ -157,7 +173,14 @@ class _HTMLToMarkdown(HTMLParser):
             if self.list_stack:
                 self.list_stack.pop()
             return
-        if tag in self._BLOCK_END or tag == "table":
+        if tag == "table":
+            self.in_table = False
+            self.flush_block()
+            return
+        if tag == "tr" and self.in_table:
+            self.flush_block()
+            return
+        if tag in self._BLOCK_END:
             self.flush_block()
 
     def handle_data(self, data):
@@ -268,7 +291,13 @@ def upsert_summary_into_cache(summary: dict, cache_path=None) -> None:
 
 
 class SyncEngine:
-    """Thread-safe sync orchestrator with in-process resume semantics."""
+    """Thread-safe sync orchestrator.
+
+    Resume is tied to failure: accumulators survive a run only when that run
+    errored mid-way (partial data worth continuing from). Any start after a
+    successful or never-run state resets them, so repeated "sync now" always
+    re-reads the site.
+    """
 
     def __init__(self):
         self._lock = threading.Lock()
@@ -281,6 +310,7 @@ class SyncEngine:
         self._error = None
         self._started_at = None
         self._finished_at = None
+        self._failed = False
 
     # -- public API ---------------------------------------------------------
 
@@ -288,7 +318,7 @@ class SyncEngine:
         with self._lock:
             if self._running:
                 return False
-            self._start_bookkeeping_locked()
+            self._start_bookkeeping_locked(resume=self._failed and bool(self._rows))
         thread = threading.Thread(
             target=self._guarded_execute,
             args=(adapter, cache_path),
@@ -301,7 +331,7 @@ class SyncEngine:
         with self._lock:
             if self._running:
                 raise RuntimeError("sync already running")
-            self._start_bookkeeping_locked()
+            self._start_bookkeeping_locked(resume=self._failed and bool(self._rows))
         self._guarded_execute(adapter, cache_path)
 
     def progress(self) -> dict:
@@ -314,12 +344,20 @@ class SyncEngine:
                 "error": self._error,
                 "started_at": self._started_at,
                 "finished_at": self._finished_at,
-                "resumable": len(self._rows) > 0 and not self._running,
+                "resumable": self._failed and len(self._rows) > 0 and not self._running,
             }
 
     # -- internals ------------------------------------------------------------
 
-    def _start_bookkeeping_locked(self):
+    def _start_bookkeeping_locked(self, *, resume: bool):
+        if not resume:
+            # fresh full sync: drop any accumulated rows/pages/dedup sets so
+            # the loop re-reads every page instead of resuming past the end
+            self._seen_slugs = set()
+            self._seen_ids = set()
+            self._rows = []
+            self._pages_done = 0
+            self._total = None
         self._running = True
         self._error = None
         self._started_at = _utc_now_iso()
@@ -328,10 +366,13 @@ class SyncEngine:
     def _guarded_execute(self, adapter, cache_path):
         try:
             self._sync_loop(adapter, cache_path)
+            with self._lock:
+                self._failed = False
         except Exception as exc:
             logger.exception("problem sync failed: %s", exc)
             with self._lock:
                 self._error = str(exc)
+                self._failed = True
         finally:
             with self._lock:
                 self._running = False
@@ -365,8 +406,18 @@ class SyncEngine:
                 self._pages_done += 1
                 if self._total is None:
                     self._total = page.get("total")
-                total = int(self._total or 0)
-            if not rows or skip + len(rows) >= total:
+                try:
+                    known_total = int(self._total) if self._total is not None else None
+                except (TypeError, ValueError):
+                    known_total = None
+            if not rows:
+                break
+            if known_total is not None and skip + len(rows) >= known_total:
+                break
+            # unknown total: a short page is the last one (otherwise the site
+            # would have filled PAGE_SIZE); prevents both truncation and an
+            # infinite loop
+            if known_total is None and len(rows) < PAGE_SIZE:
                 break
         with self._lock:
             ordered = sorted(self._rows, key=lambda row: _sort_key(row.get("frontend_id")))
@@ -385,12 +436,12 @@ class SyncEngine:
 
 
 def problem_dir_for(detail_or_summary: dict, workspace_root=None) -> Path:
-    from lc.config import workspace_root_path
+    from lc.config import effective_config, workspace_root_path
 
     root = (
         Path(workspace_root)
         if workspace_root is not None
-        else workspace_root_path({})
+        else workspace_root_path(effective_config())
     )
     slug = detail_or_summary.get("slug") or "unknown-problem"
     frontend_id = str(detail_or_summary.get("frontend_id", "") or "")
@@ -401,15 +452,28 @@ def problem_dir_for(detail_or_summary: dict, workspace_root=None) -> Path:
     return root / "problems" / name
 
 
+_DIR_NAME_RE = re.compile(r"^(\d+)-(.+)$")
+
+
 def find_problem_dir(workspace_root: Path, slug: str) -> Path | None:
+    """Locate a materialized problem directory by its exact naming convention.
+
+    A directory is either `<slug>` (non-numeric frontend id) or
+    `<digits>-<slug>`. Parsing the convention (instead of a suffix check)
+    matters: endswith(f"-{slug}") made slug "sum" hijack "0001-two-sum".
+    """
     problems_dir = Path(workspace_root) / "problems"
     direct = problems_dir / slug
     if direct.exists():
         return direct
-    if problems_dir.exists():
-        for child in problems_dir.iterdir():
-            if child.is_dir() and (child.name == slug or child.name.endswith(f"-{slug}")):
-                return child
+    if not problems_dir.exists():
+        return None
+    for child in sorted(problems_dir.iterdir()):
+        if not child.is_dir():
+            continue
+        match = _DIR_NAME_RE.match(child.name)
+        if match and match.group(2) == slug:
+            return child
     return None
 
 
@@ -439,8 +503,23 @@ def parse_sample_case(raw: str) -> list:
 
 
 def build_cases_payload(detail: dict) -> dict:
-    inputs = parse_sample_case(detail.get("sample_test_case", ""))
-    cases = [{"inputs": inputs, "expected_output": None}] if inputs else []
+    """Official example cases as separate entries.
+
+    The detail query returns exampleTestcases as a JSON-encoded list where
+    each element is one full input block; those are authoritative. The single
+    sampleTestCase is only a fallback for responses without examples, so the
+    same case is not stored twice.
+    """
+    blocks = [block for block in (detail.get("example_test_cases") or []) if str(block).strip()]
+    if not blocks:
+        sample = detail.get("sample_test_case", "") or ""
+        if sample.strip():
+            blocks = [sample]
+    cases = []
+    for block in blocks:
+        inputs = parse_sample_case(str(block))
+        if inputs:
+            cases.append({"inputs": inputs, "expected_output": None})
     return {"schema_version": 1, "cases": cases}
 
 

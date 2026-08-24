@@ -19,9 +19,11 @@ const codingLang = ref('cpp')
 const cookieConfigured = ref(null)
 const saving = ref(false)
 const savedAt = ref('')
+const saveError = ref('')
 
 const clearingData = ref(false)
 const clearMessage = ref('')
+const clearConfirmInput = ref('')
 
 const languages = [
   { value: 'cpp', label: 'C++' },
@@ -31,9 +33,7 @@ const languages = [
 
 onMounted(async () => {
   try {
-    const response = await fetch('/api/settings')
-    if (!response.ok) return
-    const settings = await response.json()
+    const settings = await api.getSettings()
     codingLang.value = settings.default_language || 'cpp'
     cookieConfigured.value = Boolean(settings.configured)
   } catch {
@@ -42,24 +42,25 @@ onMounted(async () => {
 })
 
 async function saveDefaultLanguage() {
+  if (saving.value) return
   saving.value = true
+  saveError.value = ''
   try {
-    const response = await fetch('/api/settings', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ default_language: codingLang.value }),
-    })
-    if (response.ok) {
-      savedAt.value = new Date().toLocaleTimeString()
-    }
+    await api.putSettings({ default_language: codingLang.value })
+    savedAt.value = new Date().toLocaleTimeString()
+  } catch (err) {
+    saveError.value = err.message || String(err)
   } finally {
     saving.value = false
   }
 }
 
+function clearConfirmReady() {
+  return clearConfirmInput.value.trim() === 'DELETE'
+}
+
 async function eraseAllData() {
-  if (clearingData.value) return
-  if (!window.confirm(i18n.t('clear_confirm'))) return
+  if (clearingData.value || !clearConfirmReady()) return
   clearingData.value = true
   clearMessage.value = ''
   try {
@@ -117,9 +118,10 @@ async function eraseAllData() {
         <button class="btn btn-primary" type="button" :disabled="saving" @click="saveDefaultLanguage">
           {{ i18n.t('save') }}
         </button>
-        <span v-if="savedAt" class="saved-hint" data-testid="saved-hint">
+        <span v-if="savedAt && !saveError" class="saved-hint" data-testid="saved-hint">
           {{ i18n.t('saved_ok') }} · {{ savedAt }}
         </span>
+        <span v-if="saveError" class="error-hint" data-testid="save-error">{{ saveError }}</span>
       </div>
     </div>
 
@@ -145,11 +147,21 @@ async function eraseAllData() {
       <h2>{{ i18n.t('data_section') }}</h2>
       <p class="hint-text">{{ i18n.t('data_path_hint') }}</p>
       <code class="data-path" data-testid="data-dir">{{ status.dataDir || '—' }}</code>
+      <p class="hint-text">{{ i18n.t('clear_confirm_typed') }}</p>
       <div class="row">
+        <input
+          v-model="clearConfirmInput"
+          class="input confirm-input mono"
+          type="text"
+          spellcheck="false"
+          autocomplete="off"
+          placeholder="DELETE"
+          data-testid="clear-confirm-input"
+        />
         <button
           class="btn btn-ghost danger"
           type="button"
-          :disabled="clearingData"
+          :disabled="clearingData || !clearConfirmReady()"
           data-testid="clear-data-btn"
           @click="eraseAllData"
         >
@@ -177,6 +189,20 @@ async function eraseAllData() {
 .saved-hint {
   color: var(--accent);
   font-size: var(--font-size-caption);
+}
+
+.error-hint {
+  color: var(--text-primary);
+  font-size: var(--font-size-caption);
+  font-weight: 500;
+}
+
+.confirm-input {
+  max-width: 180px;
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
 }
 
 .btn-sm {

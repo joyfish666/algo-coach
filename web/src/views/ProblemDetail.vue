@@ -43,6 +43,23 @@ const inflightRun = ref(false)
 const inflightSubmit = ref(false)
 const verdict = ref(null)
 
+const judgingActive = ref(false)
+const judgingSeconds = ref(0)
+let judgingTimer = null
+
+function startJudgingIndicator() {
+  judgingActive.value = true
+  judgingSeconds.value = 0
+  clearInterval(judgingTimer)
+  judgingTimer = setInterval(() => (judgingSeconds.value += 1), 1000)
+}
+
+function stopJudgingIndicator() {
+  judgingActive.value = false
+  clearInterval(judgingTimer)
+  judgingTimer = null
+}
+
 const restoreCandidate = ref(null)
 const showRestoreBar = ref(false)
 
@@ -134,14 +151,21 @@ onBeforeUnmount(() => {
   onMouseUp()
 })
 
-const difficultyQuery = computed(() => (problem.value?.difficulty || '').toLowerCase())
+const languageOptions = computed(() =>
+  languages.map((item) => ({
+    ...item,
+    missing: problem.value ? !problem.value.languages_available.includes(item.value) : false,
+  }))
+)
 
 async function loadProblem() {
+  const qidAtStart = props.qid
   loading.value = true
   errorText.value = ''
   verdict.value = null
   try {
     const data = await api.getProblem(props.qid)
+    if (props.qid !== qidAtStart) return // a newer navigation superseded us
     problem.value = data
     lang.value =
       data.language && languages.some((l) => l.value === data.language)
@@ -161,9 +185,10 @@ async function loadProblem() {
       showRestoreBar.value = true
     }
   } catch (err) {
+    if (props.qid !== qidAtStart) return
     applyError(err)
   } finally {
-    loading.value = false
+    if (props.qid === qidAtStart) loading.value = false
   }
 }
 
@@ -263,6 +288,7 @@ async function runCode() {
   verdict.value = null
   errorText.value = ''
   clearTimeout(autosaveTimer)
+  startJudgingIndicator()
   try {
     await api.putSolution(props.qid, lang.value, code.value)
     verdict.value = await api.judgeRun({
@@ -275,6 +301,7 @@ async function runCode() {
     applyError(err)
   } finally {
     inflightRun.value = false
+    stopJudgingIndicator()
   }
 }
 
@@ -284,6 +311,7 @@ async function submitCode() {
   verdict.value = null
   errorText.value = ''
   clearTimeout(autosaveTimer)
+  startJudgingIndicator()
   try {
     await api.putSolution(props.qid, lang.value, code.value)
     verdict.value = await api.judgeSubmit({
@@ -295,7 +323,18 @@ async function submitCode() {
     applyError(err)
   } finally {
     inflightSubmit.value = false
+    stopJudgingIndicator()
   }
+}
+
+// Ctrl+Enter runs, Ctrl+Shift+Enter submits - the workbench's primary loop
+// should not require leaving the keyboard
+function onKeydown(event) {
+  if (!(event.ctrlKey || event.metaKey) || event.key !== 'Enter') return
+  if (!problem.value || errorText.value) return
+  event.preventDefault()
+  if (event.shiftKey) submitCode()
+  else runCode()
 }
 
 onBeforeRouteLeave(() => {
@@ -311,12 +350,36 @@ function onBeforeUnload() {
 
 onMounted(() => {
   window.addEventListener('beforeunload', onBeforeUnload)
+  window.addEventListener('keydown', onKeydown)
   loadProblem()
 })
 
+// vue-router reuses this component on param-only changes, so /problem/a ->
+// /problem/b fires beforeRouteUpdate (not Leave) and never remounts; reload
+// explicitly or problem A's statement stays under B's URL
+watch(
+  () => props.qid,
+  (next, prev) => {
+    if (!next || !prev || next === prev) return
+    // pending debounced save must not land under the new qid
+    clearTimeout(autosaveTimer)
+    autosaveTimer = null
+    saveSnapshot(prev, lang.value, code.value)
+    verdict.value = null
+    errorText.value = ''
+    showRestoreBar.value = false
+    restoreCandidate.value = null
+    statementHtml.value = ''
+    stopJudgingIndicator()
+    loadProblem()
+  }
+)
+
 onBeforeUnmount(() => {
   window.removeEventListener('beforeunload', onBeforeUnload)
+  window.removeEventListener('keydown', onKeydown)
   clearTimeout(autosaveTimer)
+  stopJudgingIndicator()
 })
 </script>
 
@@ -403,9 +466,8 @@ onBeforeUnmount(() => {
                   :disabled="switchingLang"
                   data-testid="editor-lang-select"
                 >
-                  <option v-for="item in languages" :key="item.value" :value="item.value">
-                    {{ item.label }}
-                    <template v-if="!problem.languages_available.includes(item.value)"> ·</template>
+                  <option v-for="item in languageOptions" :key="item.value" :value="item.value">
+                    {{ item.label }}{{ item.missing ? ` · ${i18n.t('lang_missing')}` : '' }}
                   </option>
                 </select>
               </div>
@@ -422,6 +484,7 @@ onBeforeUnmount(() => {
                   class="btn btn-ghost"
                   type="button"
                   :disabled="inflightRun"
+                  title="Ctrl+Enter"
                   data-testid="run-btn"
                   @click="runCode"
                 >
@@ -431,6 +494,7 @@ onBeforeUnmount(() => {
                   class="btn btn-primary"
                   type="button"
                   :disabled="inflightSubmit"
+                  title="Ctrl+Shift+Enter"
                   data-testid="submit-btn"
                   @click="submitCode"
                 >
@@ -473,11 +537,14 @@ onBeforeUnmount(() => {
         </section>
       </div>
 
-      <JudgeResultPanel
-        v-if="verdict"
-        :verdict="verdict"
-        :show-input="verdict.mode === 'run'"
-      />
+      <div v-if="judgingActive" class="card judging-card" data-testid="judging-indicator">
+        <span class="judging-dot"></span>
+        <span>{{ i18n.t('judging_in_progress') }}</span>
+        <span class="judging-seconds">{{ judgingSeconds }}s</span>
+        <span v-if="inflightSubmit" class="hint-text">{{ i18n.t('judging_submit_hint') }}</span>
+      </div>
+
+      <JudgeResultPanel v-if="verdict" :verdict="verdict" />
     </template>
 
     <AiChatSidebar v-if="problem && problem.supported !== false" :qid="problem.slug || props.qid" />
@@ -712,5 +779,35 @@ onBeforeUnmount(() => {
 .saved-hint {
   color: var(--accent);
   font-size: var(--font-size-caption);
+}
+
+.judging-card {
+  align-items: center;
+  color: var(--text-primary);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+}
+
+.judging-dot {
+  animation: judging-pulse 1s infinite;
+  background: var(--accent);
+  border-radius: 50%;
+  display: inline-block;
+  height: 8px;
+  width: 8px;
+}
+
+.judging-seconds {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  min-width: 3ch;
+}
+
+@keyframes judging-pulse {
+  50% {
+    opacity: 0.3;
+  }
 }
 </style>

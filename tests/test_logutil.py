@@ -1,4 +1,5 @@
 import logging
+import logging.handlers
 
 import lc.logutil as logutil
 
@@ -45,3 +46,17 @@ def test_setup_logging_replaces_handlers(tmp_path):
     count_first = len(logutil.logger.handlers)
     logutil.setup_logging(debug=True)
     assert len(logutil.logger.handlers) == count_first
+
+
+def test_setup_logging_uses_rotating_file_handler(tmp_path):
+    log_file = tmp_path / "coach.log"
+    logutil.setup_logging(debug=False, log_file=log_file)
+    file_handlers = [
+        h
+        for h in logutil.logger.handlers
+        if isinstance(h, logging.handlers.RotatingFileHandler)
+    ]
+    assert len(file_handlers) == 1
+    handler = file_handlers[0]
+    assert handler.maxBytes == logutil.LOG_MAX_BYTES
+    assert handler.backupCount == logutil.LOG_BACKUP_COUNT

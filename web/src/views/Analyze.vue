@@ -110,7 +110,7 @@ onMounted(() => loadAnalyze(false))
         <StatCard v-for="item in statCards" :key="item.key" :label="i18n.t(item.key)" :value="item.value" />
       </div>
       <p v-if="data.stats.attempts_total !== undefined" class="attempts-line">
-        {{ i18n.t('stat_total') }} · {{ data.stats.attempts_total }} attempts
+        {{ i18n.t('stat_attempts', { count: data.stats.attempts_total }) }}
       </p>
 
       <div class="card chart-card">
@@ -145,7 +145,7 @@ onMounted(() => loadAnalyze(false))
               data-testid="generate-report"
               @click="loadAnalyze(true)"
             >
-              {{ generating ? i18n.t('finishing') : i18n.t('analyze_ai_generate') }}
+              {{ generating ? i18n.t('analyze_ai_generating') : i18n.t('analyze_ai_generate') }}
             </button>
             <div v-else class="report" data-testid="ai-report" v-html="aiReportHtml"></div>
             <p v-if="generating" class="placeholder">{{ i18n.t('analyze_loading') }}</p>

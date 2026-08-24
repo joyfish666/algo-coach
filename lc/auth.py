@@ -15,7 +15,6 @@ Responsibilities:
 from __future__ import annotations
 
 import threading
-from urllib.parse import urlparse
 
 import requests
 
@@ -132,13 +131,15 @@ def check_response(response, *, context: str = "") -> None:
 
 
 _state_lock = threading.Lock()
+_persist_lock = threading.Lock()
 _session = None
 _http_client = None
+_last_persisted_cookie: str | None = None
 
 
 def configure(cookie_string: str = "", request_interval: float = None, timeout: float = None):
     """Build and register fresh session + client singletons."""
-    global _session, _http_client
+    global _session, _http_client, _last_persisted_cookie
     from lc.config import DEFAULTS, load
 
     interval = request_interval
@@ -156,6 +157,8 @@ def configure(cookie_string: str = "", request_interval: float = None, timeout: 
     with _state_lock:
         _session = new_session
         _http_client = new_client
+    with _persist_lock:
+        _last_persisted_cookie = None
     return _http_client
 
 
@@ -163,22 +166,34 @@ def _persist_rotated_cookies(client) -> None:
     """Persist session rotation: cn re-issues LEETCODE_SESSION on logins and
     may rotate it over time; browsers auto-save, so must we — otherwise the
     on-disk cookie goes stale while the in-memory one works, and vice versa
-    when other processes probe with the old value."""
+    when other processes probe with the old value.
+
+    Serialized behind _persist_lock so a sync-worker thread and an API thread
+    cannot interleave load/save and lose an update; the in-memory cache skips
+    the disk round-trip entirely while the cookie is unchanged (the steady
+    state for every response).
+    """
+    global _last_persisted_cookie
     from lc.config import load as load_config, save as save_config
 
     jar = client.session.cookies
     session_value = jar.get("LEETCODE_SESSION")
-    csrf_value = jar.get("csrftoken")
     if not session_value:
         return
+    csrf_value = jar.get("csrftoken")
     new_cookie = f"csrftoken={csrf_value or ''}; LEETCODE_SESSION={session_value}"
-    current = load_config()
-    if current.get("cookie") == new_cookie:
-        return
-    current["cookie"] = new_cookie
-    if csrf_value:
-        current["csrf_token"] = csrf_value
-    save_config(current)
+    with _persist_lock:
+        if new_cookie == _last_persisted_cookie:
+            return
+        current = load_config()
+        if current.get("cookie") == new_cookie:
+            _last_persisted_cookie = new_cookie
+            return
+        current["cookie"] = new_cookie
+        if csrf_value:
+            current["csrf_token"] = csrf_value
+        save_config(current)
+        _last_persisted_cookie = new_cookie
 
 
 def rebuild(cookie_string: str = "", **kwargs):
@@ -197,7 +212,9 @@ def get_http_client():
 
 
 def reset_state() -> None:
-    global _session, _http_client
+    global _session, _http_client, _last_persisted_cookie
     with _state_lock:
         _session = None
         _http_client = None
+    with _persist_lock:
+        _last_persisted_cookie = None

@@ -103,7 +103,6 @@ def test_probe_is_coach_true_for_real_endpoint(monkeypatch):
 
     def fake_urlopen(url, timeout=None):
         calls["url"] = url
-        import io
 
         return FakeReader()
 
@@ -112,7 +111,7 @@ def test_probe_is_coach_true_for_real_endpoint(monkeypatch):
     assert calls["url"] == "http://127.0.0.1:8000/api/status"
 
 
-def test_find_free_port_skips_occupied(monkeypatch):
+def test_bind_free_socket_skips_occupied_and_holds(monkeypatch):
     import socket
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -120,8 +119,18 @@ def test_find_free_port_skips_occupied(monkeypatch):
     occupied = sock.getsockname()[1]
     sock.listen(1)
     try:
-        free = cli.find_free_port(occupied, host="127.0.0.1")
-        assert free != occupied
+        held = cli.bind_free_socket(occupied, host="127.0.0.1")
+        try:
+            assert held.getsockname()[1] != occupied
+            # the socket is returned still bound+listening: while we hold it,
+            # a second bind on the same port must fail (that is the point -
+            # uvicorn receives an already-held listener)
+            rival = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            with pytest.raises(OSError):
+                rival.bind(("127.0.0.1", held.getsockname()[1]))
+                rival.listen(1)
+        finally:
+            held.close()
     finally:
         sock.close()
 

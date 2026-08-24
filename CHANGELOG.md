@@ -7,8 +7,122 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Hardening pass (2026-08-24): full review across design / UI / logic / tests / docs
+
+Every fix below lists its root cause; symptom patches were not accepted.
+
+**Functional**
+
+- Sync engine: a second "sync now" used to resume past the final page and exit
+  instantly, hiding site-side additions until process restart. Root cause:
+  resume semantics were tied to "rows exist" instead of "last run failed";
+  accumulators are now reset on every start that does not follow a failed run
+  (`progress().resumable` now reflects the same condition). Regression-tested.
+- Workspace lookup: `find_problem_dir` matched directories with `endswith`,
+  letting slug `sum` hijack `0001-two-sum` (wrong read/write/judge target).
+  Root cause: string heuristic instead of parsing the actual
+  `<digits>-<slug>` naming convention. Now parses and compares exactly.
+- Judge run: every official example case now participates in a remote run
+  (inputs newline-concatenated under `data_input`); previously only the first
+  stored case was sent. `cases.json` is now built from the detail query's
+  `exampleTestcases` (JSON-encoded list) with `sampleTestCase` as fallback,
+  so fetched-but-unused example data is no longer dropped.
+- Settings: removed dead config keys `theme` / `ui_language` (browser
+  localStorage is the single source of truth for UI preferences; the backend
+  copies had zero consumers). Legacy files carrying them load cleanly and the
+  keys are dropped on next save. `request_interval` is now validated to
+  [0.5, 60] seconds (422 otherwise) instead of silently disabling the rate
+  limiter; secret masking reveals only the last 4 chars (no more 6-char
+  prefix leak). Destructive "erase all data" now requires typing `DELETE`.
+- AI sidebar: switching problems resets the conversation (the workbench is
+  reused across routes, so the previous problem's chat leaked into the next
+  problem's LLM context) and error bubbles are excluded from follow-up
+  history; stale in-flight answers are discarded after a switch.
+
+**UI**
+
+- Error messages now follow the UI language: the api layer translates the
+  server's stable `message_key` centrally instead of every view showing the
+  backend-locale `message`. This also exposed and fixed the auth banner
+  rendering the raw key `cookie_invalid` (missing catalog entry).
+- Submit/run show a live judging indicator with elapsed time and a keep-page-
+  open hint (a formal submission can take up to ~2 minutes). Note: client-side
+  cancel is deliberately NOT provided - the site-side submission has already
+  started and cannot be retracted, so an abort button would only fake safety.
+- WA diff table dropped its always-empty input column (backend returns one
+  merged input blob, so per-row inputs were rendered as meaningless dashes).
+- Language dropdown marks not-yet-downloaded languages explicitly ("未获取")
+  instead of a bare "·"; Ctrl+Enter runs and Ctrl+Shift+Enter submits;
+  Analyze uses proper generating/attempts copy instead of borrowing the setup
+  wizard's "saving…" string.
+
+**Logic**
+
+- Status classification collapsed to a single source (`cn.classify_status_text`)
+  shared by judge results and site import - the duplicated api-layer table had
+  already drifted (imports mislabeled Internal Error).
+- `problem_dir_for` resolves its default workspace root through the effective
+  config instead of an empty dict that silently ignored `workspace_root`.
+- `Archive.recent()` takes the append lock (concurrent reads can no longer see
+  half-written lines); judge endpoints read the problem cache once per request;
+  `cli` binds and holds the listener socket before uvicorn starts, closing the
+  find-port/release/rebind TOCTOU window; LLM failures are logged.
+
+**Tests & tooling**
+
+- Live-network regression suite added (`tests/test_integration_live.py`,
+  opt-in via `ALGOCOACH_TEST_COOKIE` + `pytest -m integration`; excluded from
+  default runs and CI by pyproject addopts) - the `integration` marker was
+  previously declared but had zero tests.
+- Full-chain mocked E2E (`tests/test_flow_api.py`) covering setup → sync →
+  open → run → submit → analyze, plus regression tests for every fix above;
+  central per-test reset of process singletons (`tests/conftest.py`) removes
+  order-dependent leakage of the archive cache between cases.
+- CI: Python matrix extended to 3.10/3.11/3.12 (3.10/3.11 exercise the
+  no-tomllib fallback parser), ruff lint job added, `--passWithNoTests`
+  removed from the vitest invocation, eslint introduced for the web app
+  (`npm run lint`). Ruff also surfaced a latent NameError in test_httpclient.
+
+**Docs**
+
+- ARCHITECTURE corrected against reality: `GET /api/problem/{qid}` documented
+  as lazy materialization (fetch-once-then-offline), not "pure read"; storage
+  layout, settings contract, sync resume semantics and the socket-hold guard
+  updated. PITFALLS backfilled (data_input serialization entry closed, new
+  entries for sync-resume semantics, directory-name parsing, silent i18n
+  missing keys, error-language policy).
+
 ### Fixed
 
+- Security hardening: user-supplied `{qid}` path parameters and site-returned
+  `titleSlug` values are now validated against an `[A-Za-z0-9_-]` whitelist at the
+  API boundary and in the cn adapter (fail-closed), closing path-traversal vectors
+  that could write outside the workspace (`PUT /api/problem/../solution`,
+  backslash payloads on Windows, hostile sync rows).
+- SPA static hosting: dist containment check replaced a flawed `startswith`
+  prefix comparison with `Path.relative_to`, so sibling directories such as
+  `dist-old/` can no longer be served through crafted paths.
+- Local origin guard: the Host header is parsed with `urlparse` so bracketed
+  IPv6 (`[::1]:8000`) validates correctly; forced refresh moved from the
+  side-effectful `GET /api/problem/{qid}?refresh=1` to
+  `POST /api/problem/{qid}/refresh` (GET is now strictly read-only).
+- Logging was never wired up: `coach` now configures the algocoach logger on
+  startup with an always-on rotating file (`~/.algocoach/coach.log`, 1 MB x 1
+  backup) and `--debug` verbosity, making the redacted HTTP debug trail and the
+  "share the debug log" support flow actually work.
+- Cookie-rotation persistence races: rotated-cookie write-back is serialized
+  behind a dedicated lock (a sync thread and an API thread could previously
+  interleave load/save and lose unrelated config updates), and an in-memory
+  cache skips the per-response disk round-trip while the cookie is unchanged.
+- Problem sync no longer truncates after page one when leetcode.cn omits the
+  list `total`: unknown totals now fall back to short-page detection instead of
+  impersonating a complete single-page catalog.
+- Web: navigating between two problems (`/problem/a` -> `/problem/b`) reuses the
+  component without remounting; ProblemDetail now watches the qid param, flushes
+  pending autosave under the old qid, resets state and reloads, discarding
+  out-of-order responses.
+- Web: sync-progress polling now has a failure budget (5 consecutive errors)
+  instead of showing "syncing" forever when the endpoint keeps failing.
 - Debug-run payload field corrected to `data_input` (matching the browser), which was the cause
   of site-side Internal Error on Run; interpret check responses lacking state/status_msg now
   count as finished via strong result markers, and compile/runtime errors classify properly.

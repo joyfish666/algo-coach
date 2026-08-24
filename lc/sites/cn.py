@@ -9,6 +9,7 @@ problems-sync milestone; findings must be recorded back into PITFALLS.md.
 
 from __future__ import annotations
 
+import json
 import re
 
 from lc.auth import (
@@ -194,8 +195,14 @@ class LeetCodeCnAdapter(SiteAdapter):
         raw_rows = listing.get("questions") or []
         problems = [normalize_problem_row(row) for row in raw_rows]
         total = listing.get("total")
+        try:
+            total_value = int(total) if total is not None else None
+        except (TypeError, ValueError):
+            total_value = None
         return {
-            "total": int(total) if total is not None else len(problems),
+            # None means "site did not tell us"; the sync engine then falls
+            # back to short-page detection instead of truncating after page 1
+            "total": total_value,
             "problems": problems,
         }
 
@@ -340,12 +347,24 @@ def normalize_tag(raw) -> dict:
     }
 
 
+_SAFE_SLUG_RE = re.compile(r"[A-Za-z0-9_-]+")
+
+
+def require_safe_slug(slug) -> str:
+    """Reject slugs that could escape the workspace when used as path parts."""
+    value = str(slug or "")
+    if not _SAFE_SLUG_RE.fullmatch(value):
+        raise NetworkError(f"unsafe titleSlug: {value[:80]!r}", detail={"slug": value[:80]})
+    return value
+
+
 def normalize_problem_row(raw) -> dict:
     if not isinstance(raw, dict):
         raise NetworkError("problem row is not an object")
     slug = raw.get("titleSlug")
     if not slug:
         raise NetworkError("problem row missing titleSlug", detail={"raw_keys": sorted(raw)})
+    slug = require_safe_slug(slug)
     frontend_id = (
         raw.get("frontendQuestionId")
         or raw.get("questionFrontendId")
@@ -403,10 +422,30 @@ def normalize_question_detail(raw) -> dict:
             "statement_html": str(statement),
             "hints": [str(hint) for hint in (raw.get("hints") or [])],
             "sample_test_case": str(raw.get("sampleTestCase", "") or ""),
+            "example_test_cases": parse_example_testcases(raw.get("exampleTestcases")),
             "code_snippets": snippets,
         }
     )
     return detail
+
+
+def parse_example_testcases(raw) -> list:
+    """Decode the JSON-encoded exampleTestcases string into input blocks.
+
+    The field arrives as e.g. '["[2,7,11,15]\\n9", "[3,2,4]\\n6"]'; each
+    element is one full case input. A plain (non-JSON) payload degrades to a
+    single block so unusual shapes never lose data.
+    """
+    text = str(raw or "").strip()
+    if not text:
+        return []
+    try:
+        parsed = json.loads(text)
+    except ValueError:
+        return [text]
+    if isinstance(parsed, list):
+        return [str(item) for item in parsed if str(item).strip()]
+    return [text]
 
 
 def normalize_site_submission(raw: dict) -> dict | None:
@@ -443,13 +482,27 @@ _STATUS_KEY_RULES = (
 )
 
 
+def classify_status_text(text) -> str:
+    """Single source of status classification for every caller.
+
+    Matches the human-readable verdict text (check payloads, site submission
+    feeds). Returns "" when nothing matches so callers can apply their own
+    fallback ("unknown" for check payloads, "other" for imports).
+    """
+    lowered = str(text or "").strip().lower()
+    for marker, key in _STATUS_KEY_RULES:
+        if marker in lowered:
+            return key
+    return ""
+
+
 def _classify_status(status_msg, run_success) -> str:
     text = str(status_msg or "").strip().lower()
     if not text and run_success:
         return "accepted"
-    for marker, key in _STATUS_KEY_RULES:
-        if marker in text:
-            return key
+    classified = classify_status_text(text)
+    if classified:
+        return classified
     if text == "finished" and run_success:
         return "accepted"
     return "unknown"

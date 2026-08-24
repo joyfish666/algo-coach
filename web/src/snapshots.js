@@ -9,7 +9,7 @@ function snapshotKey(qid, lang) {
 export function saveSnapshot(qid, lang, content) {
   const key = snapshotKey(qid, lang)
   const entry = { k: key, t: Date.now() }
-  let index = []
+  let index
   try {
     index = JSON.parse(localStorage.getItem(INDEX_KEY) || '[]')
   } catch {

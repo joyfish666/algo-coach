@@ -1,8 +1,10 @@
 # Contributing
 
-> **English summary**: backend dev — `python -m venv .venv`, `pip install -e ".[dev]"`, run
-> `pytest` (all HTTP mocked); frontend dev — `cd web && npm install && npm run dev`
-> (strict port 5173, backend on 8000). Bug fixes require a root-cause analysis in the PR.
+> **English summary**: backend dev — `python -m venv .venv`, `pip install -e ".[dev]"`,
+> run `ruff check .` and `pytest` (all HTTP mocked; live-network cases need
+> `ALGOCOACH_TEST_COOKIE` + `pytest -m integration`); frontend dev —
+> `cd web && npm install && npm run dev` (strict port 5173, backend on 8000),
+> then `npm run lint && npm test`. Bug fixes require a root-cause analysis in the PR.
 > Read `docs/zh/PITFALLS.md` before development and record every newly solved pitfall back.
 > Use conventional commits. Contributions of any size are welcome!
 
@@ -18,10 +20,12 @@
 python -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
+ruff check .
 pytest
 ```
 
-单元测试全部 mock HTTP，不真连网络；需要真网验证的用例标记 `integration`，手动运行。
+单元测试全部 mock HTTP，不真连网络；真网用例标记 `integration`（默认排除），
+设置 `ALGOCOACH_TEST_COOKIE` 后手动运行。提交前请确保 `ruff check .` 通过。
 
 ### 前端
 
@@ -34,6 +38,8 @@ cd web
 npm install
 npm run dev
 ```
+
+提交前请运行 `npm run lint` 与 `npm test`。
 
 ## 提交规范
 

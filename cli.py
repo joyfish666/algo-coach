@@ -11,6 +11,8 @@ Single-instance guard (closes the port-shift blind spot):
   is taken over automatically (crash leftovers)
 - before shifting away from an occupied preferred port, /api/status is probed:
   an answering coach instance refuses startup, any other occupant just shifts
+- the shifted-to listener socket is bound once and handed to uvicorn, so no
+  other process can claim the chosen port between discovery and startup
 """
 
 from __future__ import annotations
@@ -32,8 +34,10 @@ from rich.panel import Panel
 
 import lc
 from lc.config import INSTANCE_LOCK_NAME, app_dir
+from lc.logutil import setup_logging
 
 LOCK_FILE_NAME = INSTANCE_LOCK_NAME
+LOG_FILE_NAME = "coach.log"
 STILL_ACTIVE = 259
 
 
@@ -112,14 +116,21 @@ def probe_is_coach(host: str, port: int) -> bool:
         return False
 
 
-def find_free_port(start: int, host: str = "127.0.0.1"):
+def bind_free_socket(start: int, host: str = "127.0.0.1") -> socket.socket:
+    """Bind a listener on the first free port at or after `start` and KEEP it.
+
+    The socket stays open and is handed to uvicorn, closing the classic
+    TOCTOU gap where find-then-release let another process claim the port
+    between discovery and server startup.
+    """
     for port in range(start, start + 100):
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-            try:
-                sock.bind((host, port))
-                return port
-            except OSError:
-                continue
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            sock.bind((host, port))
+            sock.listen(128)
+            return sock
+        except OSError:
+            sock.close()
     raise RuntimeError(f"no free port found starting from {start}")
 
 
@@ -163,14 +174,26 @@ def main(argv=None):
 
     host = "127.0.0.1"
 
+    # Wire the algocoach logger: always-on rotating file (support diagnostics,
+    # see i18n "share the debug log" copy) plus --debug verbosity on console.
+    log_dir = app_dir()
+    try:
+        log_dir.mkdir(parents=True, exist_ok=True)
+        setup_logging(debug=args.debug, log_file=log_dir / LOG_FILE_NAME)
+    except OSError:
+        setup_logging(debug=args.debug)
+        print(f"[coach] warning: could not write {log_dir / LOG_FILE_NAME}")
+
     if probe_is_coach(host, args.port):
         print(f"[coach] another AlgoCoach instance already answers at http://{host}:{args.port}")
         print("[coach] refusing to start a second one; open that URL in your browser instead.")
         return 1
 
-    port = find_free_port(args.port, host)
+    sock = bind_free_socket(args.port, host)
+    port = sock.getsockname()[1]
     owned, existing = acquire_instance_lock(port)
     if not owned:
+        sock.close()
         recorded = existing.get("port", port)
         print(
             f"[coach] refusing to start: another AlgoCoach instance "
@@ -184,6 +207,7 @@ def main(argv=None):
         host=host,
         port=port,
         log_level="debug" if args.debug else "info",
+        sock=sock,
     )
     server = uvicorn.Server(config)
 

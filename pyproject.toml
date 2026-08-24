@@ -33,6 +33,7 @@ dependencies = [
 dev = [
     "pytest>=8.0",
     "httpx>=0.27",
+    "ruff>=0.4",
 ]
 
 [project.urls]
@@ -52,6 +53,21 @@ server = ["webdist/**/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# live-network tests (tests/test_integration_live.py) are opt-in:
+#   pytest -m integration   (with ALGOCOACH_TEST_COOKIE set)
+addopts = '-m "not integration"'
 markers = [
     "integration: tests hitting the real network, run manually",
 ]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = [
+    "E9",   # syntax-level errors
+    "F",    # pyflakes: undefined names, unused imports, f-string issues
+    "W605", # invalid escape sequences
+]
+

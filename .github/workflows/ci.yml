@@ -6,21 +6,34 @@ on:
   pull_request:
 
 jobs:
-  pytest:
-    name: pytest (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+  lint:
+    name: ruff
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - run: pip install ruff
+      - run: ruff check .
+
+  pytest:
+    name: pytest (${{ matrix.os }}, py${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        # 3.10/3.11 exercise the no-tomllib fallback parser path that 3.12+ never takes
+        python: ['3.10', '3.11', '3.12']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
       - name: Install package
         run: pip install -e ".[dev]"
-      - name: Run tests
+      - name: Run tests (integration excluded by default)
         run: pytest
 
   web:
@@ -38,7 +51,9 @@ jobs:
           cache-dependency-path: web/package-lock.json
       - name: Install dependencies
         run: npm ci
+      - name: Lint
+        run: npm run lint
       - name: Build
         run: npm run build
       - name: Unit tests
-        run: npx vitest run --passWithNoTests
+        run: npx vitest run

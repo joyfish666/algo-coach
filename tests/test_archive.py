@@ -1,7 +1,6 @@
 import json
 import threading
 
-import pytest
 
 from lc.archive import (
     Archive,
@@ -161,3 +160,24 @@ def test_recommend_problems_skips_solved_and_unsupported():
     weak = [{"slug": "array", "mastered": 0.4}]
     recs = recommend_problems(cache, latest, weak)
     assert [r["slug"] for r in recs] == ["next-easy", "next-med"]
+
+
+def test_recent_never_reads_half_written_line(tmp_path):
+    """recent() shares the append lock; under concurrent writes every record
+    it returns must still be a complete JSON object."""
+    import threading
+
+    archive = Archive(tmp_path / "submissions.jsonl")
+    writer = threading.Thread(
+        target=lambda: [archive.append({"n": i, "pad": "x" * 200}) for i in range(300)]
+    )
+    writer.start()
+    reads = 0
+    while writer.is_alive():
+        for record in archive.recent(limit=10_000):
+            assert isinstance(record, dict) and "n" in record
+            reads += 1
+    writer.join()
+    final = archive.recent(limit=10_000)
+    assert len(final) == 300
+    assert archive.attempts_total() == 300

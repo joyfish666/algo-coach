@@ -10,12 +10,19 @@
 python -m venv .venv
 source .venv/bin/activate      # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
+ruff check .                   # CI 会跑，提交前先本地过一遍
 pytest
 ```
 
-- 单元测试 HTTP 全 mock，不真连网络。
-- 需要真网验证的用例标记 `@pytest.mark.integration`，手动运行：
-  `pytest -m integration`。
+- 单元测试 HTTP 全 mock，不真连网络；默认通过 pyproject `addopts` 排除
+  `integration` 标记（CI 同样不跑）。
+- 真网回归用例集中在 `tests/test_integration_live.py`，手动运行：
+
+  ```bash
+  ALGOCOACH_TEST_COOKIE="csrftoken=...; LEETCODE_SESSION=..." pytest -m integration
+  ```
+
+  未设置该环境变量时用例自动 skip。
 
 ## 前端
 
@@ -26,6 +33,7 @@ cd web
 npm install
 npm run dev      # http://localhost:5173
 npm run build    # 产物 web/dist/
+npm run lint     # eslint
 npm run test     # vitest
 ```
 

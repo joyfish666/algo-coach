@@ -1,4 +1,3 @@
-import fastapi.testclient
 
 import lc
 from lc.exceptions import AuthError, JudgeError

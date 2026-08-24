@@ -125,3 +125,87 @@ def test_configure_reads_interval_from_config_file(tmp_path, monkeypatch):
 
 def test_requests_exception_types_available():
     assert requests.ConnectionError is not None
+
+
+# ---------------------------------------------------------------------------
+# rotated-cookie persistence (C2)
+
+
+def _client_with_session(session_value, csrf_value):
+    return auth.configure(f"csrftoken={csrf_value}; LEETCODE_SESSION={session_value}")
+
+
+def test_persist_rotated_cookies_writes_only_on_change(monkeypatch):
+    import lc.config as config
+
+    saved = []
+    current = {"cookie": "csrftoken=old; LEETCODE_SESSION=old"}
+    monkeypatch.setattr(config, "load", lambda *a, **k: dict(current))
+
+    def fake_save(data, *a, **k):
+        current.update(data)
+        saved.append(data.get("cookie"))
+
+    monkeypatch.setattr(config, "save", fake_save)
+
+    client = _client_with_session("new-sess", "new-tok")
+    auth._persist_rotated_cookies(client)
+    assert saved == ["csrftoken=new-tok; LEETCODE_SESSION=new-sess"]
+
+    # steady state: identical cookie must not hit the disk again
+    auth._persist_rotated_cookies(client)
+    auth._persist_rotated_cookies(client)
+    assert len(saved) == 1
+
+    # rotation: a changed session value is persisted exactly once
+    rotated = _client_with_session("rotated-sess", "new-tok")
+    auth._persist_rotated_cookies(rotated)
+    assert len(saved) == 2
+    assert saved[1].endswith("LEETCODE_SESSION=rotated-sess")
+
+
+def test_persist_rotated_cookies_skips_disk_when_config_matches(monkeypatch):
+    import lc.config as config
+
+    cookie = "csrftoken=t1; LEETCODE_SESSION=s1"
+    monkeypatch.setattr(config, "load", lambda *a, **k: {"cookie": cookie})
+    calls = []
+    monkeypatch.setattr(
+        config, "save", lambda data, *a, **k: calls.append(dict(data))
+    )
+
+    client = _client_with_session("s1", "t1")
+    auth._last_persisted_cookie = None
+    auth._persist_rotated_cookies(client)
+    assert calls == []
+    assert auth._last_persisted_cookie == cookie
+
+
+def test_persist_rotated_cookies_thread_safety(monkeypatch):
+    import threading
+
+    import lc.config as config
+
+    monkeypatch.setattr(config, "load", lambda *a, **k: {})
+    saves = []
+    saves_lock = threading.Lock()
+
+    def fake_save(data, *a, **k):
+        with saves_lock:
+            saves.append(data.get("cookie"))
+
+    monkeypatch.setattr(config, "save", fake_save)
+
+    clients = [_client_with_session(f"s{i}", f"t{i}") for i in range(8)]
+    threads = [
+        threading.Thread(target=auth._persist_rotated_cookies, args=(c,))
+        for c in clients
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert sorted(saves) == sorted(
+        f"csrftoken=t{i}; LEETCODE_SESSION=s{i}" for i in range(8)
+    )

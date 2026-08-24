@@ -20,7 +20,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from lc.config import archive_path
-from lc.logutil import logger
 
 
 def _utc_now_iso() -> str:
@@ -173,16 +172,19 @@ class Archive:
 
     def recent(self, limit: int = 50) -> list:
         records = []
-        if self.path.exists():
-            with open(self.path, encoding="utf-8") as fh:
-                for line in fh:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        records.append(json.loads(line))
-                    except json.JSONDecodeError:
-                        continue
+        # same lock as append(): a concurrent judge write must not be read
+        # back half-flushed (the corrupt-line skip stays as crash tolerance)
+        with self._lock:
+            if self.path.exists():
+                with open(self.path, encoding="utf-8") as fh:
+                    for line in fh:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            records.append(json.loads(line))
+                        except json.JSONDecodeError:
+                            continue
         return list(reversed(records[-limit:]))
 
     def latest_by_slug(self) -> dict:

@@ -1,10 +1,6 @@
-import time
 
-import pytest
-from fastapi.testclient import TestClient
 
-from lc.judge import POLL_INTERVAL_SECONDS, judge_run, judge_submit, unknown_verdict
-from server import api as api_module
+from lc.judge import judge_run, judge_submit, unknown_verdict
 
 
 class FakeJudgeResponse:

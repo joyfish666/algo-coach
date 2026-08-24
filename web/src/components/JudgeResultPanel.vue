@@ -5,7 +5,6 @@ import { useI18nStore } from '../stores/i18n'
 
 const props = defineProps({
   verdict: { type: Object, required: true },
-  showInput: { type: Boolean, default: false },
 })
 
 const i18n = useI18nStore()
@@ -92,14 +91,12 @@ const runtimeError = computed(() => (statusKey.value === 'runtime_error'
     <table v-if="waRows.length" class="wa-table">
       <thead>
         <tr>
-          <th v-if="showInput">{{ i18n.t('label_input') }}</th>
           <th>{{ i18n.t('label_expected') }}</th>
           <th>{{ i18n.t('label_actual') }}</th>
         </tr>
       </thead>
       <tbody>
         <tr v-for="(row, index) in waRows" :key="index">
-          <td v-if="showInput" class="mono">—</td>
           <td class="mono">{{ row.expected }}</td>
           <td class="mono diff">{{ row.actual }}</td>
         </tr>

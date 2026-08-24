@@ -8,11 +8,15 @@ Responsibilities:
 from __future__ import annotations
 
 import logging
+from logging.handlers import RotatingFileHandler
 
 logger = logging.getLogger("algocoach")
 
 SENSITIVE_HEADERS = {"cookie", "authorization", "x-csrftoken"}
 REDACTED_PLACEHOLDER = "<redacted>"
+
+LOG_MAX_BYTES = 1_000_000
+LOG_BACKUP_COUNT = 1
 
 _configured = False
 
@@ -59,7 +63,12 @@ def setup_logging(debug: bool = False, log_file=None) -> None:
     console.setFormatter(formatter)
     logger.addHandler(console)
     if log_file:
-        file_handler = logging.FileHandler(str(log_file), encoding="utf-8")
+        file_handler = RotatingFileHandler(
+            str(log_file),
+            maxBytes=LOG_MAX_BYTES,
+            backupCount=LOG_BACKUP_COUNT,
+            encoding="utf-8",
+        )
         file_handler.setFormatter(formatter)
         logger.addHandler(file_handler)
     _configured = True
