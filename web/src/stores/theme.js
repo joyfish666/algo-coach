@@ -1,6 +1,9 @@
 import { defineStore } from 'pinia'
 
 const STORAGE_KEY = 'algocoach-theme'
+// module-level so re-mounting App (HMR/tests) cannot stack duplicate
+// matchMedia listeners that would never be removed
+let mediaBound = false
 
 function readStoredTheme() {
   try {
@@ -34,6 +37,8 @@ export const useThemeStore = defineStore('theme', {
     },
     init() {
       this.apply()
+      if (mediaBound) return
+      mediaBound = true
       window
         .matchMedia('(prefers-color-scheme: dark)')
         .addEventListener('change', () => {

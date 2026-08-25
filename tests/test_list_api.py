@@ -251,6 +251,28 @@ def test_favorites_store_atomic_and_corrupt_tolerant(tmp_path):
     assert favorites.load_favorites(path) == set()
 
 
+def test_set_favorite_survives_concurrent_toggles(tmp_path):
+    """Regression: set_favorite used to load outside the lock, so concurrent
+    toggles of different slugs could clobber each other's write."""
+    import threading
+
+    from lc import favorites
+
+    path = tmp_path / "favorites.json"
+    slugs = [f"slug-{i}" for i in range(8)]
+    threads = [
+        threading.Thread(target=favorites.set_favorite, args=(slug, True, path))
+        for slug in slugs
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    stored = favorites.load_favorites(path)
+    assert stored == set(slugs)
+
+
 def test_archive_query_skips_corrupt_lines(tmp_path):
     from lc.archive import Archive
 

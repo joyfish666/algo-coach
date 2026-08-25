@@ -3,14 +3,15 @@
 力扣（leetcode.cn）本地刷题 Web 工作台 + AI 学习教练。
 所有数据——Cookie、配置、提交归档——全部留在本地，无任何云依赖。
 
-> **状态**：v0.1.0 开发中的预发布骨架，交付计划见 [ROADMAP](docs/zh/ROADMAP.md)。
+> **状态**：v0.1.0 功能面已全部交付（真网回归实测通过，见 [ROADMAP](docs/zh/ROADMAP.md)），
+> 正在进行发布前的全面体检与打磨。
 
 ## 功能
 
 - `/setup` 引导向导：粘贴 Cookie 即时校验，可选配置 LLM Key
 - 题库全量同步：本地缓存 + 全局进度反馈（切页/刷新不丢失）+ 状态/难度/标签/关键词筛选、
-  🎲 随机一题、收藏标记与紧凑密度切换
-- 答题工作台：中文题面渲染、CodeMirror 6 编辑器、Run / Submit 富判定结果
+  随机一题、收藏标记与紧凑密度切换
+- 答题工作台：中文题面渲染、CodeMirror 6 编辑器（语法高亮随主题切换）、Run / Submit 富判定结果
   （用时/内存击败百分比、WA 用例对比、CE/RE 详情）、每题笔记、收藏星标
 - 提交历史页：本地归档的每一次提交可回看（WA 对比 / CE-RE 详情展开），按题目过滤
 - 断网复习：打开过的题目落盘为本地文件，随时可复习
@@ -64,8 +65,9 @@ POSIX 下写入时收紧文件权限。除 leetcode.cn 本身（以及你自行�
 1. **修复 bug 必须定位根源**，禁止打补丁掩盖症状；PR 中需附根因分析。
 2. **开发前必读 [docs/zh/PITFALLS.md](docs/zh/PITFALLS.md)**；解决新坑后必须回填。
 3. **依赖政策**：仅允许通用基础库——后端 `requests` / `fastapi` / `uvicorn` / `rich`；
-   前端 `vue` / `vite` / `pinia` / `vue-router` / `codemirror`，以及 CodeMirror 官方语言包
-   （如 `@codemirror/lang-cpp`）与 `markdown-it`（题面渲染，默认转义 HTML 防注入）；
+   前端 `vue` / `vite` / `pinia` / `vue-router` / `codemirror`，以及 CodeMirror 官方包
+   （语言包如 `@codemirror/lang-cpp`、语法高亮基础 `@lezer/highlight`）与
+   `markdown-it`（题面渲染，默认转义 HTML 防注入）；
    禁止搬运任何现有 LeetCode 相关项目代码，业务逻辑必须 100% 自研。
 4. **文档政策**：README 必须保持中英双份同步；docs/ 改动需同步登记 ROADMAP。
 

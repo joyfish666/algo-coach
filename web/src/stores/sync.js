@@ -8,6 +8,7 @@ const POLL_INTERVAL_MS = 1000
 const POLL_MAX_FAILURES = 5
 
 let pollTimer = null
+let pollInFlight = false
 
 /**
  * Global sync orchestration.
@@ -84,9 +85,11 @@ export const useSyncStore = defineStore('sync', {
     },
 
     async poll() {
+      if (pollInFlight) return // a >1s response must not stack overlapping polls
       const i18n = useI18nStore()
       const toast = useToastStore()
       let progress
+      pollInFlight = true
       try {
         progress = await api.getSyncProgress()
         this.pollFailures = 0
@@ -100,6 +103,8 @@ export const useSyncStore = defineStore('sync', {
           toast.error({ key: 'sync_lost' })
         }
         return
+      } finally {
+        pollInFlight = false
       }
 
       this.fetched = progress.fetched || 0

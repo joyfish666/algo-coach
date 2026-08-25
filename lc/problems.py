@@ -23,8 +23,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import shutil
+import tempfile
 import threading
 from datetime import datetime, timezone
 from html.parser import HTMLParser
@@ -334,6 +336,20 @@ class SyncEngine:
             self._start_bookkeeping_locked(resume=self._failed and bool(self._rows))
         self._guarded_execute(adapter, cache_path)
 
+    def reset(self) -> None:
+        """Drop all run state (used after the data directory was wiped)."""
+        with self._lock:
+            self._seen_slugs = set()
+            self._seen_ids = set()
+            self._rows = []
+            self._pages_done = 0
+            self._total = None
+            self._running = False
+            self._error = None
+            self._started_at = None
+            self._finished_at = None
+            self._failed = False
+
     def progress(self) -> dict:
         with self._lock:
             return {
@@ -492,8 +508,8 @@ def load_meta(directory: Path) -> dict:
 
 
 def save_meta(directory: Path, meta: dict) -> None:
-    (directory / "meta.json").write_text(
-        json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
+    _atomic_write_text(
+        directory / "meta.json", json.dumps(meta, ensure_ascii=False, indent=2)
     )
 
 
@@ -523,8 +539,24 @@ def build_cases_payload(detail: dict) -> dict:
     return {"schema_version": 1, "cases": cases}
 
 
+def _atomic_write_text(path: Path, content: str) -> None:
+    """Temp-file + os.replace, matching the persistence discipline used for
+    problems.json / config.toml. A bare write_text let a concurrent reader
+    (or a crash mid-write) observe a half-flushed workspace file."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(dir=str(path.parent), prefix=path.name + ".", suffix=".tmp")
+    tmp_path = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as fh:
+            fh.write(content)
+        os.replace(tmp_path, path)
+    finally:
+        if tmp_path.exists():
+            tmp_path.unlink()
+
+
 def _write_regenerable(path: Path, content: str) -> None:
-    path.write_text(content, encoding="utf-8")
+    _atomic_write_text(path, content)
 
 
 def _write_protected(path: Path, content: str, meta: dict, meta_key: str) -> bool:
@@ -539,7 +571,7 @@ def _write_protected(path: Path, content: str, meta: dict, meta_key: str) -> boo
             backup = path.with_suffix(path.suffix + ".bak")
             shutil.copy2(path, backup)
             backup_made = True
-    path.write_text(content, encoding="utf-8")
+    _atomic_write_text(path, content)
     meta[meta_key] = _sha256(content)
     return backup_made
 
@@ -633,7 +665,7 @@ def ensure_template(directory: Path, language: str, detail_provider) -> dict:
 
 
 def save_testcases(directory: Path, content: str) -> None:
-    (directory / "testcases.txt").write_text(content, encoding="utf-8")
+    _atomic_write_text(directory / "testcases.txt", content)
 
 
 def read_notes(directory: Path) -> str:
@@ -652,7 +684,7 @@ def save_notes(directory: Path, content: str) -> None:
     Notes are fully user-owned (like solution files): no meta.json hash is
     recorded, so refresh never touches them.
     """
-    (Path(directory) / "notes.md").write_text(content, encoding="utf-8")
+    _atomic_write_text(Path(directory) / "notes.md", content)
 
 
 def save_solution(directory: Path, language: str, code: str) -> Path:
@@ -662,7 +694,7 @@ def save_solution(directory: Path, language: str, code: str) -> Path:
     if ext is None:
         raise ValueError(f"unsupported language: {language}")
     path = directory / f"solution{ext}"
-    path.write_text(code, encoding="utf-8")
+    _atomic_write_text(path, code)
     return path
 
 

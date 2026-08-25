@@ -42,10 +42,25 @@ function clamp(x, y) {
   const width = panelEl.value?.offsetWidth || 340
   const height = panelEl.value?.offsetHeight || 520
   const maxX = window.innerWidth - width - 8
-  const maxY = window.innerHeight - height + 120
+  const maxY = window.innerHeight - height - 8
   return {
     x: Math.min(Math.max(8, x), Math.max(8, maxX)),
     y: Math.min(Math.max(8, y), Math.max(8, maxY)),
+  }
+}
+
+// a panel dragged on a larger window (or restored from storage after a
+// resolution change) must not stay stranded off-screen until the next drag
+function reclampToViewport() {
+  if (!open.value || !pos.value) return
+  pos.value = clamp(pos.value.x, pos.value.y)
+}
+
+window.addEventListener('resize', reclampToViewport)
+
+function onGlobalKeydown(event) {
+  if (event.key === 'Escape' && !event.isComposing) {
+    open.value = false
   }
 }
 
@@ -81,6 +96,17 @@ function endDrag() {
 
 onBeforeUnmount(() => {
   if (dragOffset) endDrag()
+  window.removeEventListener('resize', reclampToViewport)
+  window.removeEventListener('keydown', onGlobalKeydown)
+})
+
+watch(open, (value) => {
+  if (value) {
+    reclampToViewport()
+    window.addEventListener('keydown', onGlobalKeydown)
+  } else {
+    window.removeEventListener('keydown', onGlobalKeydown)
+  }
 })
 
 // the workbench component is reused across /problem/:qid navigations, so a
@@ -148,6 +174,9 @@ async function send() {
 }
 
 function onEnter(event) {
+  // IME composition: pressing Enter to confirm candidate characters (how
+  // Chinese input is committed) must not send a half-typed draft
+  if (event.isComposing || event.keyCode === 229) return
   if (event.shiftKey) return
   event.preventDefault()
   send()

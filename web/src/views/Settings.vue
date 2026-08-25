@@ -8,6 +8,7 @@ import { useRouter } from 'vue-router'
 
 import { api } from '../api'
 import { debugEnabled, setDebugEnabled } from '../debug'
+import { purgeAllSnapshots } from '../snapshots'
 import { useI18nStore } from '../stores/i18n'
 import { useStatusStore } from '../stores/status'
 
@@ -47,7 +48,7 @@ async function saveDefaultLanguage() {
   saveError.value = ''
   try {
     await api.putSettings({ default_language: codingLang.value })
-    savedAt.value = new Date().toLocaleTimeString()
+    savedAt.value = i18n.formatDateTime(new Date())
   } catch (err) {
     saveError.value = err.message || String(err)
   } finally {
@@ -65,6 +66,9 @@ async function eraseAllData() {
   clearMessage.value = ''
   try {
     await api.clearLocalData()
+    // drafts live in localStorage, outside the backend data dir; without
+    // purging them here the old code would resurface after re-setup
+    purgeAllSnapshots()
     clearMessage.value = i18n.t('cleared_ok')
     await status.refresh()
     setTimeout(() => router.push('/setup'), 900)
@@ -90,7 +94,7 @@ async function eraseAllData() {
         <LanguageSwitch />
       </div>
       <div class="row" data-testid="theme-switch-row">
-        <span class="field-label">{{ i18n.t('theme_system') }}</span>
+        <span class="field-label">{{ i18n.t('settings_theme') }}</span>
         <ThemeSwitch />
       </div>
       <div class="row">
@@ -136,7 +140,8 @@ async function eraseAllData() {
         >
           {{ cookieConfigured ? i18n.t('cookie_configured') : i18n.t('cookie_missing') }}
         </span>
-        <span v-else class="placeholder">API: 127.0.0.1:8000</span>
+        <!-- settings request failed: state unknown, never fabricate one -->
+        <span v-else class="placeholder">—</span>
         <RouterLink class="btn btn-ghost btn-sm" to="/setup" data-testid="update-cookie-link">
           {{ i18n.t('update_cookie') }}
         </RouterLink>

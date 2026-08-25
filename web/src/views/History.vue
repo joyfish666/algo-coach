@@ -1,9 +1,10 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { onMounted, ref } from 'vue'
 
 import PageHeader from '../components/PageHeader.vue'
 import { api } from '../api'
 import { useI18nStore } from '../stores/i18n'
+import { verdictLabel, verdictTone } from '../utils/verdict'
 
 const i18n = useI18nStore()
 
@@ -13,18 +14,18 @@ const records = ref([])
 const qidFilter = ref('')
 const limit = ref(100)
 
-// verdict -> semantic color class; one mapping shared by every row so a new
-// status_key falls back to neutral instead of silently miscoloring
+// verdict -> localized label + semantic color class; one shared mapping with
+// JudgeResultPanel so a new status_key falls back to neutral instead of
+// silently miscoloring (or showing a raw English enum in the zh UI)
 function statusClass(statusKey) {
-  if (statusKey === 'accepted') return 'chip-ok'
-  if (
-    ['wrong_answer', 'runtime_error', 'compile_error', 'tle', 'mle', 'ole'].includes(
-      statusKey
-    )
-  ) {
-    return 'chip-bad'
-  }
+  const tone = verdictTone(statusKey)
+  if (tone === 'accepted') return 'chip-ok'
+  if (tone === 'failed') return 'chip-bad'
   return ''
+}
+
+function statusLabel(statusKey) {
+  return verdictLabel(i18n, statusKey, statusKey)
 }
 
 function detailRows(record) {
@@ -37,12 +38,6 @@ function detailRows(record) {
   }
   return rows
 }
-
-const hasDetail = computed(() =>
-  records.value.some(
-    (record) => detailRows(record).length || record.compile_error || record.runtime_error
-  )
-)
 
 async function loadHistory() {
   loading.value = true
@@ -88,7 +83,7 @@ onMounted(loadHistory)
       </template>
     </PageHeader>
 
-    <div v-if="loading" class="card empty-state">{{ i18n.t('analyze_loading') }}</div>
+    <div v-if="loading" class="card empty-state">{{ i18n.t('history_loading') }}</div>
 
     <div v-else-if="errorText" class="card empty-state">
       <p>{{ errorText }}</p>
@@ -115,7 +110,7 @@ onMounted(loadHistory)
         <tbody>
           <template v-for="(record, index) in records" :key="`${record.submission_id}-${index}`">
             <tr>
-              <td class="mono">{{ new Date(record.timestamp).toLocaleString() }}</td>
+              <td class="mono">{{ i18n.formatDateTime(record.timestamp) }}</td>
               <td>
                 <RouterLink :to="`/problem/${record.slug}`" class="problem-link">
                   <span class="mono fid">{{ record.frontend_id }}</span>
@@ -125,7 +120,7 @@ onMounted(loadHistory)
               <td class="mono">{{ record.lang }}</td>
               <td>
                 <details class="detail" v-if="detailRows(record).length || record.compile_error || record.runtime_error">
-                  <summary><span class="chip" :class="statusClass(record.status)">{{ record.status }}</span></summary>
+                  <summary><span class="chip" :class="statusClass(record.status)">{{ statusLabel(record.status) }}</span></summary>
                   <div class="detail-body">
                     <table v-if="detailRows(record).length" class="wa-table">
                       <thead>
@@ -145,7 +140,7 @@ onMounted(loadHistory)
                     <pre v-if="record.runtime_error" class="mono err">{{ record.runtime_error }}</pre>
                   </div>
                 </details>
-                <span v-else class="chip" :class="statusClass(record.status)">{{ record.status }}</span>
+                <span v-else class="chip" :class="statusClass(record.status)">{{ statusLabel(record.status) }}</span>
               </td>
               <td class="mono">{{ record.runtime_display || '—' }}</td>
               <td class="mono">{{ record.memory_display || '—' }}</td>
@@ -153,7 +148,6 @@ onMounted(loadHistory)
           </template>
         </tbody>
       </table>
-      <p v-if="!hasDetail" class="placeholder hint"></p>
     </div>
   </section>
 </template>

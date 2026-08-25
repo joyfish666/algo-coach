@@ -67,7 +67,9 @@ def test_unknown_api_paths_stay_json(client, monkeypatch, fake_dist):
     monkeypatch.setattr(api_module, "DIST_DIR", fake_dist)
     response = client.get("/api/does-not-exist")
     assert response.status_code == 404
-    assert response.json()["detail"]
+    # a client typo is not a missing problem: must not leak the misleading
+    # problem_not_found copy
+    assert "problem" not in str(response.json()["detail"]).lower()
 
 
 def test_no_dist_json_hint_and_404(client, monkeypatch, tmp_path):

@@ -189,7 +189,24 @@ def main(argv=None):
         print("[coach] refusing to start a second one; open that URL in your browser instead.")
         return 1
 
-    sock = bind_free_socket(args.port, host)
+    # fail at the door, not as a 500 on every API call later
+    from lc.config import validate_environment
+
+    try:
+        validate_environment()
+    except ValueError as exc:
+        print(f"[coach] refusing to start: {exc}")
+        print("[coach] fix or remove the environment variable above, then relaunch.")
+        return 2
+
+    try:
+        sock = bind_free_socket(args.port, host)
+    except RuntimeError:
+        print(
+            f"[coach] refusing to start: no free port found between "
+            f"{args.port} and {args.port + 99}."
+        )
+        return 2
     port = sock.getsockname()[1]
     owned, existing = acquire_instance_lock(port)
     if not owned:

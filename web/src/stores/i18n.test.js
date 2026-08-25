@@ -50,4 +50,23 @@ describe('i18n store', () => {
     expect(i18n.messages.nav_problems).toBeDefined()
     expect(i18n.t('{a}+{b}', { a: 1, b: 2 })).toBe('1+2')
   })
+
+  it('formatDateTime follows the UI language, not the browser locale', () => {
+    const i18n = useI18nStore()
+    setNavigatorLanguage('en-US')
+    i18n.set('zh')
+    // zh-CN renders the ISO timestamp with Chinese date/time characters
+    const zh = i18n.formatDateTime('2026-08-24T10:00:00')
+    expect(zh).toMatch(/2026/)
+    expect(zh).not.toMatch(/PM|AM/)
+
+    i18n.set('en')
+    const en = i18n.formatDateTime('2026-08-24T22:00:00')
+    expect(en).toMatch(/PM|pm/)
+  })
+
+  it('formatDateTime passes through values it cannot parse', () => {
+    const i18n = useI18nStore()
+    expect(i18n.formatDateTime('not-a-date')).toBe('not-a-date')
+  })
 })

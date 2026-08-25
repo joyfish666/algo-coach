@@ -154,12 +154,44 @@ def configure(cookie_string: str = "", request_interval: float = None, timeout: 
         client_kwargs["timeout"] = timeout
     new_client = HttpClient(new_session, **client_kwargs)
     new_client.on_response = lambda response: _persist_rotated_cookies(new_client)
-    with _state_lock:
-        _session = new_session
-        _http_client = new_client
+    # lock order is _persist_lock -> _state_lock everywhere (see
+    # _persist_rotated_cookies); swapping both singletons under one hold of
+    # _state_lock keeps the pair internally consistent
     with _persist_lock:
         _last_persisted_cookie = None
+        with _state_lock:
+            stale_session = _session
+            _session = new_session
+            _http_client = new_client
+    if stale_session is not None:
+        # release the old connection pool instead of waiting for GC
+        try:
+            stale_session.close()
+        except Exception:  # pragma: no cover - close is best-effort hygiene
+            pass
     return _http_client
+
+
+def _merge_rotated_cookie(current: str, updates: dict) -> str:
+    """Rewrite LEETCODE_SESSION/csrftoken inside the stored cookie string.
+
+    The user may have pasted extra cookie pairs; rebuilding the string from
+    just the two managed keys silently stripped them on first rotation.
+    """
+    remaining = dict(updates)
+    pairs = []
+    for raw in (current or "").split(";"):
+        stripped = raw.strip()
+        if not stripped:
+            continue
+        name = stripped.split("=", 1)[0].strip()
+        if name in remaining:
+            pairs.append(f"{name}={remaining.pop(name)}")
+        else:
+            pairs.append(stripped)
+    for name, value in remaining.items():
+        pairs.append(f"{name}={value}")
+    return "; ".join(pairs)
 
 
 def _persist_rotated_cookies(client) -> None:
@@ -171,7 +203,9 @@ def _persist_rotated_cookies(client) -> None:
     Serialized behind _persist_lock so a sync-worker thread and an API thread
     cannot interleave load/save and lose an update; the in-memory cache skips
     the disk round-trip entirely while the cookie is unchanged (the steady
-    state for every response).
+    state for every response). A client that has since been replaced by
+    rebuild() never writes: its late-arriving responses would otherwise
+    resurrect superseded credentials over the freshly configured ones.
     """
     global _last_persisted_cookie
     from lc.config import load as load_config, save as save_config
@@ -180,12 +214,21 @@ def _persist_rotated_cookies(client) -> None:
     session_value = jar.get("LEETCODE_SESSION")
     if not session_value:
         return
-    csrf_value = jar.get("csrftoken")
-    new_cookie = f"csrftoken={csrf_value or ''}; LEETCODE_SESSION={session_value}"
+    csrf_value = jar.get("csrftoken") or ""
     with _persist_lock:
-        if new_cookie == _last_persisted_cookie:
+        with _state_lock:
+            still_current = _http_client is client
+        if not still_current:
             return
         current = load_config()
+        updates = {"LEETCODE_SESSION": session_value}
+        if csrf_value:
+            # csrftoken first keeps the canonical pair order of a freshly
+            # built cookie string identical to what setup writes
+            updates = {"csrftoken": csrf_value, "LEETCODE_SESSION": session_value}
+        new_cookie = _merge_rotated_cookie(str(current.get("cookie", "") or ""), updates)
+        if new_cookie == _last_persisted_cookie:
+            return
         if current.get("cookie") == new_cookie:
             _last_persisted_cookie = new_cookie
             return
@@ -213,8 +256,14 @@ def get_http_client():
 
 def reset_state() -> None:
     global _session, _http_client, _last_persisted_cookie
-    with _state_lock:
-        _session = None
-        _http_client = None
     with _persist_lock:
+        with _state_lock:
+            stale_session = _session
+            _session = None
+            _http_client = None
         _last_persisted_cookie = None
+    if stale_session is not None:
+        try:
+            stale_session.close()
+        except Exception:  # pragma: no cover - close is best-effort hygiene
+            pass

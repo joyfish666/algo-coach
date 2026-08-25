@@ -196,16 +196,71 @@ def test_persist_rotated_cookies_thread_safety(monkeypatch):
 
     monkeypatch.setattr(config, "save", fake_save)
 
-    clients = [_client_with_session(f"s{i}", f"t{i}") for i in range(8)]
+    # concurrent persistence attempts for the *current* client (e.g. several
+    # in-flight responses landing at once) must dedupe to a single write
+    client = _client_with_session("s0", "t0")
     threads = [
-        threading.Thread(target=auth._persist_rotated_cookies, args=(c,))
-        for c in clients
+        threading.Thread(target=auth._persist_rotated_cookies, args=(client,))
+        for _ in range(8)
     ]
     for thread in threads:
         thread.start()
     for thread in threads:
         thread.join()
 
-    assert sorted(saves) == sorted(
-        f"csrftoken=t{i}; LEETCODE_SESSION=s{i}" for i in range(8)
+    assert saves == ["csrftoken=t0; LEETCODE_SESSION=s0"]
+
+
+def test_stale_client_never_overwrites_fresh_credentials(monkeypatch):
+    """Regression: a slow in-flight response from a superseded client could
+    persist its old jar over the freshly configured cookie."""
+    import lc.config as config
+
+    saved = []
+    current = {"cookie": ""}
+    monkeypatch.setattr(config, "load", lambda *a, **k: dict(current))
+    monkeypatch.setattr(
+        config, "save", lambda data, *a, **k: (current.update(data), saved.append(data["cookie"]))
     )
+
+    stale = _client_with_session("old-sess", "old-tok")
+    auth.rebuild("csrftoken=new-tok; LEETCODE_SESSION=new-sess")
+
+    auth._last_persisted_cookie = None
+    auth._persist_rotated_cookies(stale)
+
+    assert saved == []  # the stale client never writes
+    assert current["cookie"] == ""
+
+
+def test_rotation_preserves_other_cookie_pairs(monkeypatch):
+    """Regression: rebuilding the string from just the two managed keys
+    silently stripped every other pair the user had pasted."""
+    import lc.config as config
+
+    saved = []
+    current = {
+        "cookie": "opt-in=1; csrftoken=old; LEETCODE_SESSION=old; tz=Asia%2FShanghai"
+    }
+    monkeypatch.setattr(config, "load", lambda *a, **k: dict(current))
+    monkeypatch.setattr(
+        config, "save", lambda data, *a, **k: (current.update(data), saved.append(data["cookie"]))
+    )
+
+    client = _client_with_session("new-sess", "new-tok")
+    auth._persist_rotated_cookies(client)
+    assert len(saved) == 1
+    cookie = current["cookie"]
+    assert "LEETCODE_SESSION=new-sess" in cookie
+    assert "csrftoken=new-tok" in cookie
+    # untouched pairs survive rotation, in their original positions
+    assert cookie.startswith("opt-in=1; ")
+    assert cookie.endswith("; tz=Asia%2FShanghai")
+    assert cookie.index("opt-in=1") < cookie.index("csrftoken=")
+
+
+def test_merge_rotated_cookie_appends_missing_keys():
+    merged = auth._merge_rotated_cookie(
+        "only=1", {"csrftoken": "t", "LEETCODE_SESSION": "s"}
+    )
+    assert merged == "only=1; csrftoken=t; LEETCODE_SESSION=s"

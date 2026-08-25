@@ -50,3 +50,21 @@ export function snapshotNewerThan(snapshot, epochSeconds) {
   if (!snapshot || !snapshot.t) return false
   return snapshot.t > (epochSeconds || 0) * 1000
 }
+
+export function purgeAllSnapshots() {
+  // part of "erase all local data": drafts live in the browser, not in the
+  // backend data dir, so a server-side wipe alone let pre-erase code resurface
+  // via the restore bar (solution_mtime resets to 0, making every snapshot
+  // look "newer")
+  try {
+    const stale = []
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const key = localStorage.key(i)
+      if (key && key.startsWith(PREFIX)) stale.push(key)
+    }
+    stale.forEach((key) => localStorage.removeItem(key))
+    localStorage.removeItem(INDEX_KEY)
+  } catch {
+    /* storage unavailable: nothing to purge */
+  }
+}

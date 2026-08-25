@@ -12,14 +12,19 @@ const i18n = useI18nStore()
 const md = new MarkdownIt({ html: false, linkify: false })
 
 const loading = ref(true)
-const errorText = ref('')
+// fatal: the very first stats load failed, nothing can render. Transient
+// failures (AI generation, import) must NOT land here - one flaky LLM call
+// used to replace the whole statistics view with an error card.
+const loadError = ref('')
 const data = ref(null)
 
 const importing = ref(false)
 const importMessage = ref('')
+const importFailed = ref(false)
 
 const generating = ref(false)
 const aiReportHtml = ref('')
+const actionError = ref('')
 
 const statCards = computed(() => {
   const stats = data.value?.stats
@@ -32,16 +37,31 @@ const statCards = computed(() => {
 })
 
 async function loadAnalyze(useLlm = false) {
-  if (useLlm) generating.value = true
-  else loading.value = true
-  errorText.value = ''
+  if (useLlm) {
+    generating.value = true
+  } else if (!data.value) {
+    // initial load: the page is empty, a failure is fatal
+    loading.value = true
+    loadError.value = ''
+  }
   try {
     const result = await api.analyze({ use_llm: useLlm })
     data.value = result
-    aiReportHtml.value = result.ai_report ? md.render(result.ai_report) : ''
+    if (result.ai_report) {
+      aiReportHtml.value = md.render(result.ai_report)
+      actionError.value = ''
+    }
+    // no ai_report on a plain refresh: keep the previously generated report -
+    // reloading stats used to silently wipe a report the user just paid
+    // 1-2 minutes of LLM time for
   } catch (err) {
-    errorText.value =
+    const message =
       (err.payload && err.payload.error && err.payload.error.message) || err.message || String(err)
+    if (!data.value && !useLlm) {
+      loadError.value = message
+    } else {
+      actionError.value = message
+    }
   } finally {
     loading.value = false
     generating.value = false
@@ -52,6 +72,7 @@ async function importSite() {
   if (importing.value) return
   importing.value = true
   importMessage.value = ''
+  importFailed.value = false
   try {
     const result = await api.importSite(20)
     importMessage.value = i18n.t('analyze_import_done', {
@@ -60,6 +81,7 @@ async function importSite() {
     })
     await loadAnalyze(false)
   } catch (err) {
+    importFailed.value = true
     importMessage.value =
       (err.payload && err.payload.error && err.payload.error.message) || err.message || String(err)
   } finally {
@@ -99,12 +121,19 @@ onMounted(() => loadAnalyze(false))
       </template>
     </PageHeader>
 
-    <p v-if="importMessage" class="import-note" data-testid="import-note">{{ importMessage }}</p>
+    <p
+      v-if="importMessage"
+      class="import-note"
+      :class="{ failed: importFailed }"
+      data-testid="import-note"
+    >
+      {{ importMessage }}
+    </p>
 
     <div v-if="loading" class="card empty-state">{{ i18n.t('analyze_loading') }}</div>
 
-    <div v-else-if="errorText" class="card empty-state">
-      <p>{{ errorText }}</p>
+    <div v-else-if="loadError" class="card empty-state">
+      <p>{{ loadError }}</p>
       <button class="btn btn-ghost" type="button" @click="loadAnalyze(false)">
         {{ i18n.t('retry') }}
       </button>
@@ -142,6 +171,7 @@ onMounted(() => loadAnalyze(false))
         <div class="card">
           <h2>{{ i18n.t('analyze_ai_title') }}</h2>
           <template v-if="data.ai_configured">
+            <p v-if="actionError" class="action-error" data-testid="ai-action-error">{{ actionError }}</p>
             <button
               v-if="!aiReportHtml"
               class="btn btn-primary"
@@ -169,9 +199,19 @@ onMounted(() => loadAnalyze(false))
 }
 
 .import-note {
-  color: var(--accent);
+  color: var(--ok);
   font-size: var(--font-size-caption);
   margin: calc(-1 * var(--space-4)) 0 var(--space-4);
+}
+
+.import-note.failed {
+  color: var(--danger);
+}
+
+.action-error {
+  color: var(--danger);
+  font-size: var(--font-size-caption);
+  margin: 0 0 var(--space-3);
 }
 
 .stat-grid {

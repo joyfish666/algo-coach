@@ -99,6 +99,35 @@ def test_newer_schema_version_rejected(cfg_path):
         config.load(cfg_path)
 
 
+def test_validate_environment_accepts_clean_overrides(monkeypatch):
+    monkeypatch.setenv("ALGOCOACH_REQUEST_INTERVAL", "3.5")
+    monkeypatch.setenv("ALGOCOACH_LLM_TIMEOUT", "60")
+    config.validate_environment()  # must not raise
+
+
+def test_validate_environment_names_the_offending_variable(monkeypatch):
+    """Regression: a malformed env value used to explode as a bare ValueError
+    inside effective_config() on every endpoint - including the settings API
+    needed to fix it. Validation now fails once, at startup, with the var."""
+    monkeypatch.setenv("ALGOCOACH_REQUEST_INTERVAL", "abc")
+
+    with pytest.raises(ValueError) as excinfo:
+        config.validate_environment()
+    assert "ALGOCOACH_REQUEST_INTERVAL" in str(excinfo.value)
+    assert "request_interval" in str(excinfo.value)
+
+    monkeypatch.setenv("ALGOCOACH_REQUEST_INTERVAL", "3")
+    monkeypatch.setenv("ALGOCOACH_LLM_TIMEOUT", "not-a-number")
+    with pytest.raises(ValueError) as excinfo:
+        config.validate_environment()
+    assert "ALGOCOACH_LLM_TIMEOUT" in str(excinfo.value)
+
+    # empty values are treated as unset and stay valid
+    monkeypatch.setenv("ALGOCOACH_REQUEST_INTERVAL", "")
+    monkeypatch.setenv("ALGOCOACH_LLM_TIMEOUT", "")
+    config.validate_environment()
+
+
 def test_workspace_root_resolution(tmp_path):
     custom = {"workspace_root": str(tmp_path / "custom")}
     assert config.workspace_root_path(custom) == tmp_path / "custom"

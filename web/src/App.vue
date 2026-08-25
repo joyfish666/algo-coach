@@ -154,7 +154,7 @@ watch(
       </button>
     </div>
 
-    <div v-if="authExpired" class="auth-banner" data-testid="auth-expired-banner">
+    <div v-if="authExpired && route.path !== '/setup'" class="auth-banner" data-testid="auth-expired-banner">
       <span>{{ i18n.t('cookie_invalid') }}</span>
       <button
         class="btn btn-primary btn-sm"

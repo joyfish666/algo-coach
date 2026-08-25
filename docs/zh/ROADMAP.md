@@ -12,8 +12,8 @@
 | 1 | lc 核心：config / auth / i18n / logutil / exceptions / langs / httpclient / sites.cn | ✅ 已完成 |
 | 2 | problems + server API（题库同步、缓存、续传） | ✅ 已完成 |
 | 3 | 前端骨架：tokens.css 双主题 / 侧边栏布局 / router / ThemeSwitch / i18n / 路由守卫 | ✅ 已完成 |
-| 4 | 答题工作台：ProblemDetail + CodeEditor + Run/Submit + 结果面板 + 自定义用例面板 | ◐ 已实现，待真网实测（two-sum 全流程 + 剑指 Offer slug 路由） |
-| 5 | 题库列表页 + setup 向导 + daily | ✅ 已实现，待真网联调回归 |
+| 4 | 答题工作台：ProblemDetail + CodeEditor + Run/Submit + 结果面板 + 自定义用例面板 | ✅ 已完成（two-sum 全流程真网实测通过，见下方回归表） |
+| 5 | 题库列表页 + setup 向导 + daily | ✅ 已完成（真网联调回归通过，2026-08-23） |
 | 6 | archive + llm + analyze + AI 侧边栏 | ✅ 已实现（AI 报告/ask 需真实 LLM Key 联调回归） |
 | 7 | 文档全套 + 测试补齐 + 打磨（含安装态 dist 定位验收） | ✅ 已完成（安装态验收通过：非可编辑 pip 安装下 coach 直接打开前端） |
 
@@ -68,12 +68,52 @@
 | 测试 | 新增 Problems/History/Daily/Analyze/Settings 视图测试、sync/toast store 测试、路由 smoke（36→78 用例）；后端新增收藏/笔记/历史/AI-code/API 用例（188→199）；i18n 键一致性校验脚本入 CI（首跑即抓到 auth 横幅裸键漏网）；pytest-cov 默认输出覆盖率 | 视图零测试区正是错误遮蔽 bug 的藏身处；t() 缺键静默无护栏；覆盖率盲区不可见 |
 | 文档 | ARCHITECTURE 存储/契约同步；USAGE 新功能与报错对照；PITFALLS 回填 5 条新坑；DEVELOPMENT 补 check:i18n 与覆盖率用法；双语 README 功能清单同步 | 文档落后于实现 |
 
+### 第三批（三维度复查，2026-08-24）
+
+| 类别 | 交付/修复 | 根因 |
+|---|---|---|
+| 逻辑 | favorites 读-改-写竞态：并发切换两个不同收藏可能互相覆盖丢失其一 | RMW 拆在两个公有函数里，锁只护住写半程、读半程裸奔 → 整个读-改-写收敛到同一临界区（附并发回归测试） |
+| 逻辑 | `GET /api/problem/{qid}/template` 省略 `?lang=` 时永远回退 cpp | 唯一硬编码默认值的端点；其余端点均读配置 default_language → 统一从 `_default_lang()` 取默认 |
+| 逻辑 | `PUT /api/settings` 显式传 `cookie:null` 被静默忽略 | Pydantic exclude_unset 区分「未传」与「显式 null」，但 null 分支两头落空 → 按项目「宁可报错不可静默」惯例返回 422 |
+| 逻辑 | Run 本地用例文件 exists→read 之间存在 OSError 窗口（→500） | 与 cases.json 分支错误策略不一致（后者捕获 OSError）→ 两分支对齐同一降级语义 |
+| UI/逻辑 | 未匹配的 `/api/*` 路径误报「未找到该题目」 | SPA 回退复用了题目域的文案键 → 改为通用 not found（客户端路径笔误≠题目缺失） |
+| UI | 工作台「N × hint」英文硬编码、笔记占位符中文硬编码、设置页主题行标签误用 `theme_system` 键（显示为「跟随系统」）、账号卡请求失败时显示假的「API: 127.0.0.1:8000」 | 文案绕过 i18n catalog；check:i18n 只能查 t() 引用的键，拦不住不经过 t() 的字符串 → 全部收编进 catalog；失败态显示中性占位符而非编造状态 |
+| UI | History 加载态借用 Analyze 的「正在统计…」文案；日期时间跟随浏览器语言而非界面语言（zh 界面 + en 浏览器出现 AM/PM） | 复制粘贴复用近义键；日期格式化散落各视图各自调 toLocaleString → History 专用 loading 键；日期格式化收敛到 i18n store 的 formatDateTime（附单测） |
+| UI | 分析页 AI 报告禁用提示引导用户去「设置页」配置 LLM Key，但设置页并无该表单 | 文案与页面能力漂移（LLM 配置只在 /setup 第二步）→ 文案改指引导配置页 |
+| 测试 | 最具破坏性的 `DELETE /api/local-data` 零测试覆盖；template 默认值、settings null cookie、未知 API 路径均无断言 | 端点越危险越晚写测试的风险倒挂 → 补齐擦除保留 lock/409 并发拒绝/配置默认语言/null 拒绝/通用 404 共 5 个后端用例（199→204），前端 formatDateTime 单测 2 例（78→80） |
+| 文档 | README 状态行停留在「v0.1.0 开发中的骨架」与 ROADMAP/CHANGELOG 的已交付事实矛盾；ROADMAP 阶段行「待真网实测」与下方验证表矛盾；PITFALLS 内文自引不存在的 `recentSubmissionList` 字段名；USAGE 设置页承诺不存在的 LLM 表单、`?debug=1` 暗示值敏感 | 文档更新只增不改旧账 → 本次全部对齐实现现状 |
+
+### 第四批（用户/开发者双视角体检，2026-08-25）
+
+| 类别 | 交付/修复 | 根因 |
+|---|---|---|
+| 逻辑 | `PUT /api/settings` 只有 cookie 有显式 null 守卫：`request_interval:null` → TypeError 500；字符串字段 null → 把字面量 "None" 写进 config.toml（之后 workspace_root 解析成相对目录 `Path("None")`） | 「显式 null ≠ 未传」的 fail-loud 约定只落在一个字段上，未成为端点级统一规则 → 所有字段统一 422 |
+| 逻辑 | 清除数据与同步启动存在 TOCTOU：检查 running 与删除目录之间可插入 begin()，被清空的目录里重建出半套缓存；清除后引擎残留累加器还会伪装成「可续传」快照 | 破坏性端点与后台任务生命周期没有共享互斥 → 引入 `_lifecycle_lock` 串行化两侧，清除时同步 `SyncEngine.reset()` |
+| 逻辑 | 站内导入按 feed 序（新→旧）追加，而归档查询以文件追加序为时间序：批次截断后「最新」位置实为批次内最旧记录 | 追加时序不变量未在写入侧维护 → 批次按时间戳升序排序后再追加 |
+| 逻辑 | 判题上下文缺内部题号时静默回退 slug 提交，站点报晦涩错误被包成 502 | 兜底链把「必然失败的请求」当默认路径而非显式报错 → 缺 id 直接 422（新增 judge_missing_question_id 文案键） |
+| 逻辑 | Cookie 轮换持久化只重组两个管理键，用户粘贴的其余 cookie 对在首次轮换后被无声剥离；且被替换旧 client 的迟到响应可把旧 jar 回写覆盖新凭据 | 持久化逻辑把 cookie 串视为两键所有、把 client 身份视为永久有效 → 改为向原串合并保序保留其余键对；仅当前 client 可写（锁序 _persist→_state 全局一致） |
+| 逻辑 | 工作区文件（题面/用例/meta/代码/笔记）是全仓唯一非原子写，并发读可能读到半截内容 | 原子写纪律只在 config/缓存/归档落地，工作区漏掉 → 收敛到统一 `_atomic_write_text` 原语 |
+| 逻辑 | 一个格式错误的 `ALGOCOACH_*` 环境变量让所有接口 500——包括本可用于修复它的 /api/settings | 配置错误在每次读取点爆炸而非启动门口失败一次 → `validate_environment()` 启动期校验并指名变量，coach 退出码 2；端口耗尽同样给友好提示替代裸栈 |
+| 功能 | `llm_timeout` 纳入 settings API（GET 脱敏视图 + PUT [5,600] 越界拒绝） | 该键是唯一只能改 toml/env 的配置项，管理面与其余设置不一致 |
+| 安全 | mask_secret 对 >8 字符即露尾 4：12 位 token 泄漏约 1/3 熵；独立校验 Session 不关闭靠 GC | 泄漏比例阈值缺失 → <16 字符全遮；Session 换血/重置时显式 close |
+| UI | AI 输入框 IME 组合期间 Enter 直接发送半截拼音（中文核心用户伤害最大）；Analyze 页 LLM 生成失败炸掉整页统计、普通刷新清空刚生成的报告；Run/Submit 并行竞速互相覆盖判定结果；语言切换窗口期可发出 lang/code 错配请求 | 工作台已修过的「致命/瞬态错误分离」「单一 inflight 门」教训未应用到这些后写页面 → Analyze 拆分 loadError/actionError 且报告跨刷新保留；judgingBusy 单门互斥三类操作 |
+| UI | History 结果列显示原始英文枚举（wrong_answer），与工作台的 verdict_* 翻译同概念两套呈现；「清除全部数据」后浏览器侧草稿复活弹出恢复条；筛选与 URL query 单向脱钩；灰字对比度 2.1:1/2.9:1 远低于 WCAG AA；暗色模式编辑器语法高亮仍是浅色调色板 | 映射逻辑重复实现各自漂移 → 抽取共享 verdict 工具；擦除范围遗漏 localStorage 快照 → 擦除时一并清除（偏好类保留）；query 作为唯一事实源；token 重校色；编辑器接入 @lezer/highlight 双调色板随 data-theme 切换 |
+| UI | 小项集中修：AI 面板 Esc 关闭+越界重钳制（原 clamp 允许下缘出屏 120px）、status 启动双请求合并、theme 监听防堆叠、sync 轮询防重叠、debug 关闭还原 console.error、Vue 渲染错误进调试日志、/setup 页不再叠加全局 Cookie 失效横幅、导入成功/失败同色、掌握度图 tooltip 补全名与数字含义、🎲 emoji 换 SVG 图标、判定面板隐藏无意义的 "0 / 0"、死标记清理 | 各自独立的小型一致性缺陷，逐一对齐既有设计约定 |
+| 测试 | 后端 204→216（settings null 矩阵 / llm_timeout 边界 / mask 阈值 / 引擎重置 / 缺 id 显式失败 / 无 .tmp 残留 / 导入时序 / 陈旧 client 禁写 / 键对保留 / env 校验指名）；前端 80→89（IME 组合、Esc+重钳制、报告跨刷新保留、行内生成错误、快照清除、本地化历史 chip、JudgeResultPanel 首个直测套件） | 上表每项修复各配回归测试，非法输入维度的盲区与缺陷一一对应 |
+
 ### 登记【延】
 
 - **浏览器级 E2E（Playwright 等）**：当前以路由 smoke（全部懒加载 chunk 可解析 +
   守卫重定向断言）+ 各视图挂载测试替代主干回归。引入浏览器 E2E 意味着新增重型
   devDependency 与 CI 浏览器安装成本，与本仓库最小依赖政策冲突，待主干功能稳定
   后再评估。
+- **移动端/触屏适配**：产品定位为桌面优先工具——三栏拖拽分割的工作台布局、
+  mousedown/mousemove 拖拽交互在窄屏与触屏上均不可用，当前仅分析页有一处
+  <960px 断点。完整的响应式改造需要重排工作台信息架构，成本远超打磨范畴；
+  待 v1.x 结合真实移动使用需求评估。
+- **同步任务主动取消**：同步引擎只有 begin/progress，无法中途终止
+  （删除数据靠 lifecycle 锁互斥规避）。需要协作式取消标志 + UI 取消按钮，
+  待出现真实需求再评估。
 
 ## v0.x
 

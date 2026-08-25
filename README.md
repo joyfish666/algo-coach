@@ -3,8 +3,8 @@
 A local-first practice workbench for LeetCode China (leetcode.cn) with an AI learning coach.
 All data — cookies, configs, submission archives — stays on your machine. No cloud dependency.
 
-> **Status**: pre-release skeleton under active development towards v0.1.0. See the
-> [ROADMAP](docs/zh/ROADMAP.md) for the delivery plan.
+> **Status**: v0.1.0 feature scope fully delivered (live-regression verified, see the
+> [ROADMAP](docs/zh/ROADMAP.md)); pre-release review and hardening in progress.
 
 ## Features
 
@@ -12,8 +12,9 @@ All data — cookies, configs, submission archives — stays on your machine. No
 - Full problem-list sync with local caching and app-level progress feedback that survives page
   switches and reloads; practice-status / difficulty / tag / keyword filters, random pick,
   favorites and a compact density mode
-- Answering workbench: rendered statement, CodeMirror 6 editor, Run / Submit with rich verdicts
-  (runtime/memory percentiles, WA case diff, CE/RE details), per-problem notes and favorite stars
+- Answering workbench: rendered statement, CodeMirror 6 editor with theme-aware syntax
+  highlighting, Run / Submit with rich verdicts (runtime/memory percentiles, WA case diff,
+  CE/RE details), per-problem notes and favorite stars
 - Submission history view over the local archive (expandable WA diff and CE/RE details,
   filterable by problem)
 - Offline review: opened problems are materialized to local files you own
@@ -73,8 +74,9 @@ All human developers and AI agents must follow these rules:
    pitfall must be recorded back into that file.
 3. **Dependency policy:** only general-purpose foundational libraries are allowed — backend
    `requests` / `fastapi` / `uvicorn` / `rich`; frontend `vue` / `vite` / `pinia` /
-   `vue-router` / `codemirror` plus official CodeMirror language packages (e.g.
-   `@codemirror/lang-cpp`) and `markdown-it` (statement rendering, HTML escaped by default).
+   `vue-router` / `codemirror` plus official CodeMirror packages (language packs such as
+   `@codemirror/lang-cpp`, and `@lezer/highlight` for syntax highlighting) and `markdown-it`
+   (statement rendering, HTML escaped by default).
    Copying code from any existing LeetCode-related project is strictly forbidden — all business
    logic must be original.
 4. **Documentation policy:** the README must stay synchronized in both English and Chinese;

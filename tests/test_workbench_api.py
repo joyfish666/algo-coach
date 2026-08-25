@@ -216,6 +216,46 @@ def test_judge_requires_existing_problem(client, monkeypatch):
     assert response.status_code == 404
 
 
+def test_judge_without_internal_question_id_fails_loudly(client, monkeypatch):
+    """Regression: the context resolver used to fall back to the slug as a
+    last resort; that ships a guaranteed-to-fail submit and surfaces as an
+    opaque 502 instead of an actionable error."""
+    detail = {k: v for k, v in DETAIL_FIXTURE.items() if k != "internal_question_id"}
+    detail["frontend_id"] = ""
+    adapter = open_problem(client, monkeypatch, FakeJudgeAdapter(detail=detail))
+
+    response = client.post(
+        "/api/judge/run",
+        json={"qid": "two-sum", "lang": "cpp", "code": "x"},
+        headers=ORIGIN,
+    )
+    assert response.status_code == 422
+    assert response.json()["detail"]
+    assert adapter.runs == []
+
+    response = client.post(
+        "/api/judge/submit",
+        json={"qid": "two-sum", "lang": "cpp", "code": "x"},
+        headers=ORIGIN,
+    )
+    assert response.status_code == 422
+    assert adapter.submissions == []
+
+
+def test_workspace_writes_leave_no_temp_files(client, monkeypatch):
+    """All workspace persistence goes through the atomic tmp+replace helper;
+    a crash mid-write must never strand half-flushed content or .tmp files."""
+    open_problem(client, monkeypatch)
+    client.put("/api/problem/two-sum/solution", json={"lang": "cpp", "code": "// x"}, headers=ORIGIN)
+    client.put("/api/problem/two-sum/notes", json={"content": "# note"}, headers=ORIGIN)
+    client.put("/api/problem/two-sum/testcases", json={"content": "[1]\n2"}, headers=ORIGIN)
+
+    directory = api_module.problems.find_problem_dir(api_module._workspace_root(), "two-sum")
+    leftovers = [p.name for p in directory.iterdir() if p.name.endswith(".tmp")]
+    assert leftovers == []
+    assert (directory / "notes.md").read_text(encoding="utf-8") == "# note"
+
+
 def test_check_payload_classification_variants():
     from lc.sites.cn import normalize_check_payload
 

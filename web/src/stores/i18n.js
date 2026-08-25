@@ -25,6 +25,7 @@ export const MESSAGES = {
     settings_subtitle: '偏好与账号',
     settings_appearance: '外观',
     settings_interface_lang: '界面语言',
+    settings_theme: '主题',
     settings_coding_lang: '默认刷题语言',
     settings_account: '账号（Cookie）',
     cookie_configured: '已配置',
@@ -136,7 +137,7 @@ export const MESSAGES = {
     analyze_ai_generate: '生成 AI 报告',
     analyze_ai_generating: '正在生成…',
     analyze_ai_none: '暂无 AI 报告——点击上方按钮生成',
-    analyze_ai_disabled: '未配置 LLM Key，无法生成报告（可在设置页配置）',
+    analyze_ai_disabled: '未配置 LLM Key，无法生成报告（可在引导配置页填写）',
     analyze_import: '从站内导入近期提交',
     analyze_importing: '导入中…',
     analyze_import_done: '已导入 {imported} 条，跳过重复 {skipped} 条',
@@ -165,6 +166,7 @@ export const MESSAGES = {
     nav_history: '提交记录',
     history_title: '提交历史',
     history_subtitle: '本地归档的每一次提交，可按题目过滤',
+    history_loading: '正在加载…',
     history_empty: '还没有提交记录——去题库做几道题吧',
     history_filter_placeholder: '按题号或 slug 过滤（留空看全部）',
     history_apply: '查询',
@@ -184,9 +186,13 @@ export const MESSAGES = {
     notes_title: '笔记',
     notes_hint: '自动保存到本地 notes.md',
     notes_saved: '笔记已保存',
+    notes_placeholder: '# 思路 / 复杂度 / 踩坑',
+    hints_toggle: '{count} 条提示',
     attach_code: '附带当前代码',
     request_timeout: '请求超时：后端未在时限内响应，请确认服务仍在运行',
     sync_interrupted: '后端已重启，同步被中断，请重新点击同步',
+    judge_missing_question_id: '该题缺少站点内部题号，无法判定；请重新打开题目后重试',
+    chart_row_tip: '{name}：掌握 {pct}%，做过 {count} 题',
     debug_title: '调试模式',
     debug_hint: '收集前端报错日志，点「复制日志」发给开发者即可定位问题',
     debug_copy: '复制日志',
@@ -216,6 +222,7 @@ export const MESSAGES = {
     settings_subtitle: 'Preferences & account',
     settings_appearance: 'Appearance',
     settings_interface_lang: 'Interface language',
+    settings_theme: 'Theme',
     settings_coding_lang: 'Default coding language',
     settings_account: 'Account (Cookie)',
     cookie_configured: 'Configured',
@@ -332,7 +339,7 @@ export const MESSAGES = {
     analyze_ai_generating: 'Generating…',
     analyze_ai_none: 'No AI report yet — click the button above to generate one',
     analyze_ai_disabled:
-      'LLM key not configured, AI reports unavailable (configure it on the settings page)',
+      'LLM key not configured, AI reports unavailable (configure it in Setup)',
     analyze_import: 'Import recent site submissions',
     analyze_importing: 'Importing…',
     analyze_import_done: 'Imported {imported}, skipped {skipped} duplicates',
@@ -361,6 +368,7 @@ export const MESSAGES = {
     nav_history: 'Submissions',
     history_title: 'Submission history',
     history_subtitle: 'Every archived submission, filterable by problem',
+    history_loading: 'Loading…',
     history_empty: 'No submissions yet — go solve a few problems first',
     history_filter_placeholder: 'Filter by id or slug (empty shows all)',
     history_apply: 'Apply',
@@ -380,10 +388,15 @@ export const MESSAGES = {
     notes_title: 'Notes',
     notes_hint: 'Auto-saved to local notes.md',
     notes_saved: 'Notes saved',
+    notes_placeholder: '# Approach / complexity / pitfalls',
+    hints_toggle: '{count} × hint',
     attach_code: 'Attach current code',
     request_timeout:
       'Request timed out: the backend did not respond in time; make sure it is still running',
     sync_interrupted: 'Backend restarted mid-sync; please press sync again',
+    judge_missing_question_id:
+      'This problem is missing its internal question id; reopen it and retry',
+    chart_row_tip: '{name}: {pct}% mastery, attempted {count} problems',
     debug_title: 'Debug mode',
     debug_hint: 'Collects frontend errors into a log you can copy and share',
     debug_copy: 'Copy logs',
@@ -424,6 +437,13 @@ export const useI18nStore = defineStore('i18n', {
         )
       }
       return text
+    },
+    // dates follow the chosen UI language, not the browser locale - a zh
+    // interface on an en-US browser would otherwise mix locales in one page
+    formatDateTime(value) {
+      const date = new Date(value)
+      if (Number.isNaN(date.getTime())) return String(value ?? '')
+      return date.toLocaleString(this.lang === 'zh' ? 'zh-CN' : 'en-US')
     },
     set(lang) {
       if (!MESSAGES[lang]) return

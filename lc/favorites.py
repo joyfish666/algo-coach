@@ -40,18 +40,22 @@ def load_favorites(path: Path | None = None) -> set:
     return {str(slug) for slug in slugs if slug}
 
 
+def _save_locked(slugs, target: Path) -> None:
+    """Write the index atomically; caller must hold _LOCK."""
+    ordered = sorted({str(slug) for slug in slugs if slug})
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp = target.with_name(target.name + ".tmp")
+    tmp.write_text(
+        json.dumps({"schema": 1, "slugs": ordered}, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    tmp.replace(target)
+
+
 def save_favorites(slugs, path: Path | None = None) -> None:
     target = _resolve(path)
-    ordered = sorted({str(slug) for slug in slugs if slug})
     with _LOCK:
-        target.parent.mkdir(parents=True, exist_ok=True)
-        tmp = target.with_name(target.name + ".tmp")
-        tmp.write_text(
-            json.dumps({"schema": 1, "slugs": ordered}, ensure_ascii=False, indent=2)
-            + "\n",
-            encoding="utf-8",
-        )
-        tmp.replace(target)
+        _save_locked(slugs, target)
 
 
 def is_favorite(slug: str, path: Path | None = None) -> bool:
@@ -59,14 +63,22 @@ def is_favorite(slug: str, path: Path | None = None) -> bool:
 
 
 def set_favorite(slug: str, favorite: bool, path: Path | None = None) -> bool:
-    """Set (or clear) one slug; returns the resulting state."""
+    """Set (or clear) one slug; returns the resulting state.
+
+    The whole read-modify-write runs under _LOCK: concurrent toggles of two
+    different slugs must both survive instead of the later save clobbering
+    the earlier one's change (load_favorites reads without the lock on
+    purpose - atomic replace makes plain reads safe).
+    """
     slug = str(slug or "")
     if not slug:
         raise ValueError("slug is required")
-    current = load_favorites(path)
-    if favorite:
-        current.add(slug)
-    else:
-        current.discard(slug)
-    save_favorites(current, path)
+    target = _resolve(path)
+    with _LOCK:
+        current = load_favorites(target)
+        if favorite:
+            current.add(slug)
+        else:
+            current.discard(slug)
+        _save_locked(current, target)
     return favorite

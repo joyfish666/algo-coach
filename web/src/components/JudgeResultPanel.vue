@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 
 import { useI18nStore } from '../stores/i18n'
+import { verdictLabel, verdictTone } from '../utils/verdict'
 
 const props = defineProps({
   verdict: { type: Object, required: true },
@@ -11,32 +12,18 @@ const i18n = useI18nStore()
 
 const statusKey = computed(() => props.verdict.status_key || 'unknown')
 
-const statusText = computed(() => {
-  const key = `verdict_${statusKey.value}`
-  const translated = i18n.t(key)
-  if (translated !== key) return translated
-  return props.verdict.status_msg || '—'
-})
+const statusText = computed(() =>
+  verdictLabel(i18n, statusKey.value, props.verdict.status_msg || '—')
+)
 
 const isInternalError = computed(() => statusKey.value === 'internal_error')
 
-// one semantic mapping: accepted green, every failing state red, unknown
-// neutral - colors come from the shared token palette
+// one semantic mapping shared with the History page: accepted green, every
+// failing state red, unknown neutral - colors come from the token palette
 const headlineClass = computed(() => {
-  if (statusKey.value === 'accepted') return 'is-accepted'
-  if (
-    [
-      'wrong_answer',
-      'runtime_error',
-      'compile_error',
-      'tle',
-      'mle',
-      'ole',
-      'internal_error',
-    ].includes(statusKey.value)
-  ) {
-    return 'is-failed'
-  }
+  const tone = verdictTone(statusKey.value)
+  if (tone === 'accepted') return 'is-accepted'
+  if (tone === 'failed') return 'is-failed'
   return 'is-unknown'
 })
 
@@ -47,7 +34,11 @@ const hasMetrics = computed(
 const caseCounts = computed(() => {
   const correct = props.verdict.total_correct
   const total = props.verdict.total_testcases
-  if (correct === null || correct === undefined || total === null || total === undefined) {
+  if (
+    correct === null ||
+    correct === undefined ||
+    !total // 0 or missing: "0 / 0" is noise, not information
+  ) {
     return ''
   }
   return `${correct} / ${total}`

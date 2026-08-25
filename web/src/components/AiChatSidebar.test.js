@@ -88,4 +88,48 @@ describe('ai chat sidebar', () => {
     expect(wrapper.findAll('.bubble').length).toBe(0)
     wrapper.unmount()
   })
+
+  it('does not send while an IME composition is being confirmed', async () => {
+    // Chinese input commits candidates with Enter; that Enter must not send
+    askMock.mockResolvedValue({ answer: 'nope' })
+    const wrapper = mountPanel()
+    await wrapper.find('[data-testid="ai-open"]').trigger('click')
+    await wrapper.find('textarea').setValue('pinyin draft')
+
+    const fireKeydown = (isComposing) => {
+      const event = new KeyboardEvent('keydown', { key: 'Enter', cancelable: true })
+      // isComposing is a prototype getter; define an own property to simulate
+      Object.defineProperty(event, 'isComposing', { value: isComposing })
+      wrapper.find('textarea').element.dispatchEvent(event)
+      return event.defaultPrevented
+    }
+
+    expect(fireKeydown(true)).toBe(false) // composition Enter: ignored outright
+    expect(askMock).not.toHaveBeenCalled()
+    expect(wrapper.find('textarea').element.value).toBe('pinyin draft')
+
+    expect(fireKeydown(false)).toBe(true) // normal Enter: sent + preventDefault
+    expect(askMock).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+  })
+
+  it('closes on Escape and re-clamps a restored off-screen position on resize', async () => {
+    localStorage.setItem(
+      'algocoach-ai-pos',
+      JSON.stringify({ x: 50, y: window.innerHeight + 400 })
+    )
+    const wrapper = mountPanel()
+
+    // opening re-clamps the stale position back into the viewport
+    await wrapper.find('[data-testid="ai-open"]').trigger('click')
+    const panel = wrapper.find('[data-testid="ai-panel"]')
+    expect(panel.exists()).toBe(true)
+    const top = Number.parseInt(panel.attributes('style').match(/top: (\d+)px/)[1], 10)
+    expect(top).toBeLessThan(window.innerHeight)
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    await flushPromises()
+    expect(wrapper.find('[data-testid="ai-panel"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
 })

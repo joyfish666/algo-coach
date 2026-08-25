@@ -68,6 +68,14 @@ function notifyActionError(err) {
 
 const inflightRun = ref(false)
 const inflightSubmit = ref(false)
+// Run and Submit share one verdict surface: letting them race meant the
+// slower request overwrote the newer result and the timer indicator was
+// switched off by whichever finished first. One gate excludes both, and
+// both are excluded while a language switch has code/lang temporarily
+// out of sync.
+const judgingBusy = computed(
+  () => inflightRun.value || inflightSubmit.value || switchingLang.value
+)
 const verdict = ref(null)
 
 const judgingActive = ref(false)
@@ -329,7 +337,7 @@ async function toggleFavorite() {
 }
 
 async function runCode() {
-  if (inflightRun.value) return
+  if (judgingBusy.value) return
   inflightRun.value = true
   verdict.value = null
   clearTimeout(autosaveTimer)
@@ -351,7 +359,7 @@ async function runCode() {
 }
 
 async function submitCode() {
-  if (inflightSubmit.value) return
+  if (judgingBusy.value) return
   inflightSubmit.value = true
   verdict.value = null
   clearTimeout(autosaveTimer)
@@ -501,7 +509,7 @@ onBeforeUnmount(() => {
             <div class="statement" v-html="renderedStatement"></div>
           </div>
           <details v-if="(problem.hints || []).length" class="card hints-card">
-            <summary>{{ (problem.hints || []).length }} × hint</summary>
+            <summary>{{ i18n.t('hints_toggle', { count: (problem.hints || []).length }) }}</summary>
             <ul>
               <li v-for="(hint, index) in problem.hints" :key="index">{{ hint }}</li>
             </ul>
@@ -518,7 +526,7 @@ onBeforeUnmount(() => {
               class="input notes-input"
               rows="6"
               data-testid="notes-input"
-              placeholder="# 思路 / 复杂度 / 踩坑"
+              :placeholder="i18n.t('notes_placeholder')"
             ></textarea>
           </details>
         </section>
@@ -537,7 +545,7 @@ onBeforeUnmount(() => {
                 <select
                   v-model="lang"
                   class="select"
-                  :disabled="switchingLang"
+                  :disabled="judgingBusy"
                   data-testid="editor-lang-select"
                 >
                   <option v-for="item in languageOptions" :key="item.value" :value="item.value">
@@ -558,7 +566,7 @@ onBeforeUnmount(() => {
                 <button
                   class="btn btn-ghost"
                   type="button"
-                  :disabled="inflightRun"
+                  :disabled="judgingBusy"
                   title="Ctrl+Enter"
                   data-testid="run-btn"
                   @click="runCode"
@@ -569,7 +577,7 @@ onBeforeUnmount(() => {
                 <button
                   class="btn btn-primary"
                   type="button"
-                  :disabled="inflightSubmit"
+                  :disabled="judgingBusy"
                   title="Ctrl+Shift+Enter"
                   data-testid="submit-btn"
                   @click="submitCode"

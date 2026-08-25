@@ -276,6 +276,27 @@ def _coerce(key, value):
     return str(value)
 
 
+def validate_environment(environ=None) -> None:
+    """Eagerly validate ALGOCOACH_* environment overrides.
+
+    Without this, one malformed value (e.g. ALGOCOACH_REQUEST_INTERVAL=abc)
+    exploded as a ValueError inside effective_config() on every endpoint -
+    including the settings API the operator would need to fix it. Called
+    once at startup so misconfiguration fails loudly at the door.
+    """
+    environ = os.environ if environ is None else environ
+    for key, env_name in ENV_OVERRIDES.items():
+        raw = environ.get(env_name)
+        if raw:
+            try:
+                _coerce(key, raw)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    f"environment variable {env_name}={raw!r} is not a valid "
+                    f"value for {key}: {exc}"
+                ) from None
+
+
 def _migrate(data: dict) -> dict:
     version = int(data.get("schema_version", 0) or 0)
     if version > SCHEMA_VERSION:

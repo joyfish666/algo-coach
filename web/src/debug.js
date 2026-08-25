@@ -14,6 +14,8 @@ function initialEnabled() {
 export const debugEnabled = ref(initialEnabled())
 export const debugEntries = ref([])
 let installed = false
+let consolePatched = false
+const originalConsoleError = console.error.bind(console)
 
 function stamp() {
   return new Date().toLocaleTimeString()
@@ -39,8 +41,11 @@ function install() {
     const text = reason instanceof Error ? `${reason.message}\n${reason.stack || ''}` : String(reason)
     push('unhandled-rejection', text.slice(0, 800))
   })
+}
 
-  const originalError = console.error.bind(console)
+function patchConsole() {
+  if (consolePatched) return
+  consolePatched = true
   console.error = (...args) => {
     push(
       'console.error',
@@ -49,8 +54,14 @@ function install() {
         .join(' ')
         .slice(0, 800)
     )
-    originalError(...args)
+    originalConsoleError(...args)
   }
+}
+
+function unpatchConsole() {
+  if (!consolePatched) return
+  consolePatched = false
+  console.error = originalConsoleError
 }
 
 export function setDebugEnabled(value) {
@@ -61,7 +72,12 @@ export function setDebugEnabled(value) {
   }
   if (value) {
     install()
+    patchConsole()
     push('debug', 'debug mode enabled')
+  } else {
+    // turning the bar off must also restore console.error; a one-way hijack
+    // degraded every later console.error into String()-concatenation
+    unpatchConsole()
   }
 }
 
@@ -89,4 +105,5 @@ export function debugLog(level, text) {
 
 if (debugEnabled.value) {
   install()
+  patchConsole()
 }

@@ -7,6 +7,159 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fourth review pass: user/developer double-angle audit (2026-08-25)
+
+**Bug fixes (root-caused, backend)**
+
+- `PUT /api/settings` only null-guarded `cookie`; an explicit `"request_interval": null`
+  crashed with a TypeError 500 while `"llm_base_url": null` silently wrote the literal
+  string "None" into config.toml (later parsed as a relative workspace root /
+  "None/chat/completions" base URL). One uniform rule now covers every field:
+  explicit null → 422, omission keeps the current value.
+- `DELETE /api/local-data` checked the sync flag and then deleted files with no shared
+  mutex against `POST /api/problems/sync`: a sync starting inside that window would
+  rebuild problems.json in the wiped directory. Both endpoints now serialize on one
+  lifecycle lock, and the wipe also resets stale sync-engine accumulators that used to
+  surface as a bogus "resumable" progress snapshot pointing at deleted data.
+- Site import appended submissions in feed order (newest-first) while
+  `Archive.query` derives its listing from file append order - an imported batch sat
+  reversed in history once truncated. Batches are now sorted oldest-first before append,
+  restoring the file's chronological invariant.
+- The judge context resolver fell back to the slug as question_id; cn's submit endpoint
+  needs the internal numeric id, so that path shipped a guaranteed site-side failure
+  wrapped as an opaque 502. Missing id is now an explicit actionable 422
+  (`judge_missing_question_id`, zh/en catalogs).
+- Cookie rotation persistence rebuilt the stored string from just csrftoken +
+  LEETCODE_SESSION, silently stripping any other pairs the user had pasted; it also let a
+  slow in-flight response from a superseded client write its old jar over freshly
+  configured credentials. Rotation now merges into the existing string preserving all
+  other pairs, and only the current client may persist (lock order documented).
+- Workspace files (statement/cases/meta/solution/testcases/notes) were bare
+  `write_text` - the only persistence without tmp+replace. All writes go through one
+  atomic helper now; concurrent reads can never observe half-flushed content.
+- A malformed `ALGOCOACH_*` env value exploded as a ValueError inside every
+  `effective_config()` call - bricking all endpoints including the settings API needed
+  to fix it. `validate_environment()` fails once at startup with the offending variable
+  named; `coach` exits with code 2 and instructions. (Also: port exhaustion in
+  `bind_free_socket` prints guidance instead of a raw traceback.)
+- `mask_secret` revealed the tail-4 of anything longer than 8 chars - over a quarter of
+  the entropy on short tokens. Fully masked below 16 chars now.
+- Standalone cookie validation leaked its requests.Session to GC; sessions are closed
+  on swap/reset.
+
+**Features**
+
+- `llm_timeout` joined the settings API (GET masked view + PUT with [5, 600] bounds),
+  closing the gap where it was config-file/env-only while every other knob was
+  manageable from the app.
+
+**Bug fixes (root-caused, frontend)**
+
+- The AI chat input sent on Enter during IME composition: Chinese users committing
+  candidate characters fired half-typed drafts. Composition events are ignored.
+- Analyze re-applied the "one error tears down the page" pattern already fixed in the
+  workbench: a failed LLM generation replaced the whole statistics view, and any plain
+  reload silently wiped a freshly generated AI report. Initial load failure stays fatal;
+  action failures render inline next to their button, and reports survive reloads.
+- Run and Submit each guarded only themselves: racing them let the slower verdict
+  overwrite the newer result and the timer indicator die early. One gate now excludes
+  both, plus language switches (code/lang briefly out of sync mid-switch).
+- History rendered raw English status enums (`wrong_answer`) while the workbench panel
+  translated the same values - two implementations drifting. A shared verdict util
+  (label + tone) now backs both surfaces.
+- "Erase all local data" left editor drafts alive in localStorage; after re-setup the
+  old code resurfaced via the restore bar (solution_mtime resets to 0). Erasing now
+  purges browser-side snapshots too (theme/language preferences are kept).
+- Problems filters were one-way bound: navigating back to a bare `/problems` kept stale
+  difficulty/tag filters while the URL showed none. The query is now the source of truth.
+- CodeMirror shipped light-only syntax colors; dark mode got proper token palettes via
+  `@lezer/highlight` (official package, added to the dependency policy) with chrome
+  themed through design tokens, following the `data-theme` switch live.
+- Secondary text contrast raised to WCAG AA (light 2.1:1 → ~4.9:1, dark 2.9:1 → ~6.5:1);
+  status store coalesces concurrent refreshes into one request; theme matchMedia listener
+  binds once; sync polling can no longer stack overlapping polls; debug mode restores
+  console.error when switched off (was a one-way hijack); Vue component-tree errors are
+  routed into the debug log; the global cookie banner no longer double-reports on /setup;
+  AI panel Esc-to-close + viewport re-clamp on open/resize (the drag clamp allowed the
+  bottom edge 120px off-screen); import success/failure notes finally have distinct
+  colors; the tag chart tooltips carry full tag names and explain the attempted count;
+  the random-problem emoji became a real SVG icon consistent with the icon set;
+  JudgeResultPanel hides the meaningless "0 / 0" case counter; dead markup removed.
+
+**Tests**
+
+- Backend 204 → 216: settings explicit-null matrix, llm_timeout roundtrip/bounds,
+  mask_secret thresholds, engine reset on erase, judge-without-id loud failure,
+  atomic writes leave no .tmp, import chronological order, stale-client persistence
+  guard, rotation pair preservation, env validation messages.
+- Frontend 80 → 89: IME composition Enter, Escape/re-clamp behavior, AI report
+  survival across reloads, inline generation errors, snapshot purge on erase,
+  localized history chips, and a first direct JudgeResultPanel suite.
+
+### Third review pass: concurrency, contract & i18n hardening (2026-08-24)
+
+**Bug fixes (root-caused)**
+
+- Concurrent favorite toggles of two different problems could silently drop one
+  change: `set_favorite()` performed its read outside the lock and only the
+  save was serialized, so a whole-file write clobbered the interleaved toggle.
+  The entire read-modify-write now runs inside one critical section
+  (regression test drives 8 concurrent toggles).
+- `GET /api/problem/{qid}/template` fell back to a hardcoded `cpp` when
+  `?lang=` was omitted - the only endpoint not deriving its default from
+  config; a python3-default user got C++ semantics. Defaults now come from
+  `_default_lang()` like everywhere else.
+- An explicit `"cookie": null` in `PUT /api/settings` fell through both
+  branches (skipped by the not-null check, excluded from the bulk update) and
+  was silently ignored. Per the project's fail-loudly convention it is now a
+  422; omitting the field remains the way to keep the current cookie.
+- A run with local testcases could 500 if `testcases.txt` vanished between
+  `exists()` and `read_text()`; that branch lacked the OSError degradation its
+  sibling `cases.json` branch already had. Both branches now share the same
+  degrade-to-empty policy.
+- Unknown `/api/*` paths answered with "problem not found" because the SPA
+  fallback reused the problem-domain message key for any unmatched route;
+  client typos are now answered with a generic not-found.
+
+**UI**
+
+- Hardcoded strings routed through the i18n catalog: the workbench hints
+  summary ("N × hint"), the Chinese-only notes placeholder, and the Settings
+  theme row which misused the `theme_system` key and literally read
+  "System"/「跟随系统」 as its label. The static key guard cannot see strings
+  that never call `t()`, so this class needs eyeballs, not just CI.
+- The account card fabricated an "API: 127.0.0.1:8000" line when the settings
+  request failed; unknown state now renders a neutral placeholder instead of
+  inventing information.
+- Dates followed the browser locale instead of the chosen UI language (a zh
+  interface on an en-US browser showed AM/PM); formatting is centralized in a
+  new `i18n.formatDateTime()`, and History borrowed Analyze's "Crunching
+  numbers…" loader copy no more.
+- The analytics page told users to configure their LLM key "on the settings
+  page", where no such form exists (it lives in Setup step 2); copy now points
+  to the setup wizard.
+
+**Tests**
+
+- `DELETE /api/local-data` - the most destructive endpoint - had zero
+  coverage; added erase-keeps-instance-lock and 409-during-sync cases, plus
+  template-default-language, null-cookie rejection, generic unknown-API 404
+  assertions and a favorites concurrency regression (backend 199 → 204,
+  frontend 78 → 80).
+
+**Docs**
+
+- README status lines still said "pre-release skeleton towards v0.1.0" while
+  ROADMAP/CHANGELOG recorded v0.1.0 as delivered and live-verified; both
+  READMEs updated to match reality.
+- ROADMAP stage rows still marked the workbench/list stages "awaiting live
+  testing" beneath a verification table marking them done; rows reconciled.
+- PITFALLS referenced the nonexistent `recentSubmissionList` field in one
+  bullet while another bullet documents that exact misconception; name fixed.
+- USAGE no longer claims the Settings page holds an LLM form, and describes
+  the value-insensitive `?debug` URL flag correctly. ARCHITECTURE contract
+  rows updated for template defaults, settings null-cookie semantics.
+
 ### Feature completion + second review pass (2026-08-24)
 
 Every fix again lists its root cause; symptom patches were not accepted.

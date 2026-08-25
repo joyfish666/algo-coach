@@ -439,3 +439,126 @@ def test_spa_fallback_never_serves_sibling_of_dist(tmp_path, monkeypatch):
 
     normal = api_module.spa_fallback("index.html")
     assert str(dist / "index.html") == str(getattr(normal, "path", ""))
+
+
+# ---------------------------------------------------------------------------
+# DELETE /api/local-data (most destructive endpoint)
+
+
+def test_local_data_erase_removes_files_keeps_lock_and_resets_auth(client):
+    from lc.config import INSTANCE_LOCK_NAME, app_dir, archive_path
+    from lc.archive import Archive
+
+    seed_config(cookie="csrftoken=t; LEETCODE_SESSION=s1234567890")
+    root = app_dir()
+    (root / INSTANCE_LOCK_NAME).write_text("lock", encoding="utf-8")
+    Archive(archive_path()).append({"slug": "two-sum", "status": "accepted"})
+    assert (root / "submissions.jsonl").exists()
+    assert client.get("/api/status").json()["configured"] is True
+
+    response = client.delete("/api/local-data", headers=ORIGIN)
+    assert response.status_code == 200
+    cleared = response.json()["cleared"]
+    assert "config.toml" in cleared
+    assert "submissions.jsonl" in cleared
+    # the live lock file must survive, or the single-instance guard breaks
+    assert (root / INSTANCE_LOCK_NAME).exists()
+
+    # auth state reset: the app reports unconfigured without re-seeding
+    assert client.get("/api/status").json()["configured"] is False
+
+
+def test_local_data_rejects_while_sync_running(client, monkeypatch):
+    monkeypatch.setattr(
+        api_module._sync_engine, "progress", lambda: {"running": True}
+    )
+    response = client.delete("/api/local-data", headers=ORIGIN)
+    assert response.status_code == 409
+
+
+def test_local_data_erase_resets_sync_engine_state(client):
+    """Regression: stale engine accumulators survived the wipe and surfaced
+    as a bogus "resumable" progress snapshot pointing at deleted data."""
+    class TinyAdapter:
+        def fetch_problem_list_page(self, skip, limit):
+            return {"total": 0, "problems": []}
+
+    assert api_module._sync_engine.run_blocking(TinyAdapter()) is None
+    before = api_module._sync_engine.progress()
+    assert before["started_at"] is not None
+
+    response = client.delete("/api/local-data", headers=ORIGIN)
+    assert response.status_code == 200
+
+    after = api_module._sync_engine.progress()
+    assert after["started_at"] is None
+    assert after["finished_at"] is None
+    assert after["resumable"] is False
+    assert after["fetched"] == 0
+
+
+def test_template_defaults_to_configured_language(client, monkeypatch):
+    seed_config(default_language="python3")
+    adapter = FakeAdapter(detail=DETAIL_FIXTURE)
+    monkeypatch.setattr(api_module, "create_adapter", lambda: adapter)
+    client.get("/api/problem/two-sum")
+
+    response = client.get("/api/problem/two-sum/template")
+    assert response.status_code == 200
+    assert response.json()["lang"] == "python3"
+
+
+def test_settings_rejects_explicit_null_cookie(client):
+    seed_config(cookie="csrftoken=t; LEETCODE_SESSION=s1234567890")
+    before = client.get("/api/settings").json()["cookie_masked"]
+
+    response = client.put("/api/settings", json={"cookie": None}, headers=ORIGIN)
+    assert response.status_code == 422
+    # the current cookie is untouched by the rejected request
+    assert client.get("/api/settings").json()["cookie_masked"] == before
+
+
+def test_settings_reject_explicit_null_for_any_field(client):
+    """Regression: only cookie used to be null-guarded. A null elsewhere was
+    a TypeError 500 for numeric fields and, worse, the literal string "None"
+    silently written into config.toml for text fields."""
+    seed_config()
+    for payload in (
+        {"request_interval": None},
+        {"llm_timeout": None},
+        {"llm_base_url": None},
+        {"llm_model": None},
+        {"workspace_root": None},
+        {"default_language": None},
+        {"llm_api_key": None},
+    ):
+        response = client.put("/api/settings", json=payload, headers=ORIGIN)
+        assert response.status_code == 422, payload
+
+    import lc.config as config
+
+    stored = config.load()
+    for key in ("llm_base_url", "llm_model", "workspace_root", "default_language"):
+        assert stored.get(key) != "None", key
+
+
+def test_settings_llm_timeout_roundtrip_and_bounds(client):
+    seed_config()
+    ok = client.put("/api/settings", json={"llm_timeout": 30}, headers=ORIGIN)
+    assert ok.status_code == 200
+    assert ok.json()["llm_timeout"] == 30.0
+    fetched = client.get("/api/settings").json()
+    assert fetched["llm_timeout"] == 30.0
+    for bad in (4, 601, -1):
+        response = client.put("/api/settings", json={"llm_timeout": bad}, headers=ORIGIN)
+        assert response.status_code == 422, bad
+
+
+def test_mask_secret_short_values_stay_fully_masked():
+    assert api_module.mask_secret("") == ""
+    assert api_module.mask_secret("short") == "***"
+    # 15 chars: revealing tail-4 would expose >25% of the entropy
+    assert api_module.mask_secret("x" * 15) == "***"
+    masked = api_module.mask_secret("y" * 32)
+    assert masked.startswith("…")
+    assert "yyyy" not in masked[:-1] or masked.endswith("yyyy")

@@ -64,13 +64,16 @@ const filtered = computed(() =>
 
 const paged = computed(() => paginate(sortByMode(filtered.value, sortMode.value), page.value, PAGE_SIZE))
 
+// The URL query is the source of truth for the filters it carries: applying
+// only present keys used to leave stale filters active after navigating back
+// to a bare /problems (URL said "no filter", the list stayed filtered).
 function applyRouteQuery() {
   if (route.path !== '/problems') return
   const q = route.query
-  if (q.q !== undefined) keyword.value = String(q.q)
+  keyword.value = q.q !== undefined ? String(q.q) : ''
   const diff = String(q.difficulty || '')
-  if (['easy', 'medium', 'hard'].includes(diff)) difficulty.value = diff
-  if (q.tag !== undefined) tagSlug.value = String(q.tag)
+  difficulty.value = ['easy', 'medium', 'hard'].includes(diff) ? diff : ''
+  tagSlug.value = q.tag !== undefined ? String(q.tag) : ''
 }
 
 watch(() => route.fullPath, applyRouteQuery, { immediate: true })
@@ -147,7 +150,7 @@ onMounted(() => {
           </button>
           <span v-if="sync.running" class="sync-note">{{ i18n.t('sync_eta') }}</span>
           <span v-else-if="syncedAt" class="last-synced">
-            {{ i18n.t('last_synced') }}: {{ new Date(syncedAt).toLocaleString() }}
+            {{ i18n.t('last_synced') }}: {{ i18n.formatDateTime(syncedAt) }}
           </span>
         </div>
       </template>
@@ -191,7 +194,15 @@ onMounted(() => {
         data-testid="random-btn"
         @click="goRandom"
       >
-        🎲 {{ i18n.t('action_random') }}
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect x="3.5" y="3.5" width="17" height="17" rx="4" />
+          <circle cx="8.5" cy="8.5" r="1.15" fill="currentColor" stroke="none" />
+          <circle cx="15.5" cy="15.5" r="1.15" fill="currentColor" stroke="none" />
+          <circle cx="12" cy="12" r="1.15" fill="currentColor" stroke="none" />
+          <circle cx="15.5" cy="8.5" r="1.15" fill="currentColor" stroke="none" />
+          <circle cx="8.5" cy="15.5" r="1.15" fill="currentColor" stroke="none" />
+        </svg>
+        {{ i18n.t('action_random') }}
       </button>
       <button
         class="btn btn-ghost"

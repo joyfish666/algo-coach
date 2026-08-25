@@ -1,9 +1,13 @@
 <script setup>
 import { computed } from 'vue'
 
+import { useI18nStore } from '../stores/i18n'
+
 const props = defineProps({
   tags: { type: Array, default: () => [] },
 })
+
+const i18n = useI18nStore()
 
 const ROW_HEIGHT = 30
 const CHART_WIDTH = 640
@@ -17,11 +21,12 @@ const height = computed(() => Math.max(props.tags.length, 1) * ROW_HEIGHT + 12)
 const bars = computed(() =>
   props.tags.map((tag, index) => {
     const y = index * ROW_HEIGHT + 8
-    const name = (tag.name_zh || tag.name_en || tag.slug || '').slice(0, 10)
+    const fullName = tag.name_zh || tag.name_en || tag.slug || ''
     const pct = Math.round((tag.mastered || 0) * 100)
     return {
       id: `${tag.slug}-${index}`,
-      name,
+      name: fullName.slice(0, 10),
+      tip: i18n.t('chart_row_tip', { name: fullName, pct, count: tag.attempted }),
       pct,
       attempted: tag.attempted,
       y,
@@ -41,6 +46,9 @@ const bars = computed(() =>
     data-testid="tag-chart"
   >
     <g v-for="bar in bars" :key="bar.id">
+      <!-- native SVG tooltip: carries the full untruncated tag name plus what
+           the trailing number means -->
+      <title>{{ bar.tip }}</title>
       <text :x="4" :y="bar.y + 14" class="label">{{ bar.name }}</text>
       <rect
         :x="BAR_X"

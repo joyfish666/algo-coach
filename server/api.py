@@ -66,6 +66,10 @@ app = FastAPI(title="AlgoCoach", version=lc.__version__)
 _sync_engine = problems.SyncEngine()
 _archive_lock = threading.Lock()
 _archive: Archive | None = None
+# Serializes the destructive data wipe against sync startup: without it a
+# POST /api/problems/sync could slip in between clear's running-check and
+# the directory deletion, leaving a half-rebuilt cache in a "cleared" dir.
+_lifecycle_lock = threading.Lock()
 
 
 def find_dist_dir() -> Path | None:
@@ -130,13 +134,19 @@ def create_adapter() -> LeetCodeCnAdapter:
 def validate_cookie_standalone(cookie: str) -> dict:
     config = effective_config()
     session = auth.build_session(cookie)
-    client = HttpClient(
-        session,
-        default_headers=dict(auth.DEFAULT_HEADERS),
-        request_interval=min(float(config.get("request_interval", 2.0)), 1.0),
-    )
-    adapter = LeetCodeCnAdapter(client=client)
-    return adapter.validate_cookie()
+    # deliberately isolated from the global singletons: a failed validation
+    # must never clobber a working session; closed afterwards so the pooled
+    # connections do not linger until GC
+    try:
+        client = HttpClient(
+            session,
+            default_headers=dict(auth.DEFAULT_HEADERS),
+            request_interval=min(float(config.get("request_interval", 2.0)), 1.0),
+        )
+        adapter = LeetCodeCnAdapter(client=client)
+        return adapter.validate_cookie()
+    finally:
+        session.close()
 
 
 @app.middleware("http")
@@ -255,11 +265,13 @@ def validate_cookie(payload: CookiePayload):
 
 def mask_secret(value: str) -> str:
     """Reveal only the tail: even a short prefix of a session token aids
-    correlation attacks, so nothing but the last 4 chars is ever returned."""
+    correlation attacks, so nothing but the last 4 chars is ever returned.
+    Secrets shorter than 16 chars stay fully masked - on those the tail
+    alone would expose too large a fraction of the entropy."""
     value = value or ""
     if not value:
         return ""
-    if len(value) <= 8:
+    if len(value) < 16:
         return "***"
     return f"…{value[-4:]}"
 
@@ -272,6 +284,7 @@ def masked_settings(config: dict) -> dict:
         "llm_api_key_masked": mask_secret(config.get("llm_api_key", "")),
         "llm_base_url": config.get("llm_base_url", ""),
         "llm_model": config.get("llm_model", ""),
+        "llm_timeout": config.get("llm_timeout", 120.0),
         "default_language": config.get("default_language", DEFAULT_LANGUAGE),
         "request_interval": config.get("request_interval", 2.0),
         "workspace_root": config.get("workspace_root", ""),
@@ -290,6 +303,7 @@ class SettingsUpdate(BaseModel):
     llm_api_key: str | None = None
     llm_base_url: str | None = None
     llm_model: str | None = None
+    llm_timeout: float | None = None
     default_language: str | None = None
     request_interval: float | None = None
     workspace_root: str | None = None
@@ -302,6 +316,9 @@ class SettingsUpdate(BaseModel):
 REQUEST_INTERVAL_MIN = 0.5
 REQUEST_INTERVAL_MAX = 60.0
 
+LLM_TIMEOUT_MIN = 5.0
+LLM_TIMEOUT_MAX = 600.0
+
 
 @app.put("/api/settings")
 def update_settings(payload: SettingsUpdate):
@@ -310,6 +327,19 @@ def update_settings(payload: SettingsUpdate):
     rebuild_needed = False
 
     updates = payload.model_dump(exclude_unset=True)
+    # one uniform rule for every field: an explicit null is a client bug
+    # (omitting the field already means "keep current value"). Letting nulls
+    # through used to mean a TypeError 500 for numeric fields and - worse -
+    # the string "None" silently written into config.toml for text fields.
+    null_fields = sorted(key for key, value in updates.items() if value is None)
+    if null_fields:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"field(s) {', '.join(null_fields)} cannot be null; "
+                "omit them to keep the current value"
+            ),
+        )
     if "request_interval" in updates:
         interval = float(updates["request_interval"])
         if not REQUEST_INTERVAL_MIN <= interval <= REQUEST_INTERVAL_MAX:
@@ -320,7 +350,17 @@ def update_settings(payload: SettingsUpdate):
                     f"[{REQUEST_INTERVAL_MIN}, {REQUEST_INTERVAL_MAX}]: {interval}"
                 ),
             )
-    if "cookie" in provided and updates.get("cookie") is not None:
+    if "llm_timeout" in updates:
+        timeout = float(updates["llm_timeout"])
+        if not LLM_TIMEOUT_MIN <= timeout <= LLM_TIMEOUT_MAX:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"llm_timeout out of range "
+                    f"[{LLM_TIMEOUT_MIN}, {LLM_TIMEOUT_MAX}]: {timeout}"
+                ),
+            )
+    if "cookie" in provided:
         from lc.auth import extract_csrf_token
 
         config["cookie"] = updates["cookie"]
@@ -372,7 +412,8 @@ def get_problems():
 @app.post("/api/problems/sync")
 def start_sync():
     adapter = create_adapter()
-    started = _sync_engine.begin(adapter, cache_path=None)
+    with _lifecycle_lock:
+        started = _sync_engine.begin(adapter, cache_path=None)
     if not started:
         raise HTTPException(status_code=409, detail=t("sync_in_progress"))
     return {"started": True, "progress": _sync_engine.progress()}
@@ -445,7 +486,11 @@ def refresh_problem(qid: str):
 
 
 @app.get("/api/problem/{qid}/template")
-def get_template(qid: str, lang: str = "cpp"):
+def get_template(qid: str, lang: str | None = None):
+    # default comes from config like everywhere else, not a hardcoded cpp:
+    # a python3-default user hitting this route without ?lang= must not get
+    # C++ semantics
+    lang = lang or _default_lang()
     _require_safe_slug(qid)
     if not is_supported(lang):
         raise HTTPException(status_code=422, detail=f"unsupported language: {lang}")
@@ -581,9 +626,18 @@ def _resolve_judge_context(slug: str) -> tuple:
     if not question_id:
         detail = create_adapter().fetch_question_detail(slug)
         question_id = str(detail.get("internal_question_id", "") or "")
+    # last-resort fallback is the numeric frontend id; falling back to the
+    # slug used to ship a guaranteed-to-fail submit that surfaced as an
+    # opaque site-side error wrapped in a 502 - fail loudly instead
+    question_id = question_id or str(frontend_row.get("frontend_id", "") or "")
+    if not question_id:
+        raise HTTPException(
+            status_code=422,
+            detail=t("judge_missing_question_id"),
+        )
     return (
         directory,
-        question_id or str(frontend_row.get("frontend_id", "") or "") or slug,
+        question_id,
         frontend_row,
         cache_rows,
     )
@@ -604,9 +658,16 @@ def judge_run_endpoint(payload: JudgeRunPayload):
 
     if payload.use_local:
         testcases_path = directory / "testcases.txt"
-        input_text = (
-            testcases_path.read_text(encoding="utf-8") if testcases_path.exists() else ""
-        )
+        try:
+            input_text = (
+                testcases_path.read_text(encoding="utf-8")
+                if testcases_path.exists()
+                else ""
+            )
+        except OSError:
+            # same policy as the cases.json branch: the file may vanish
+            # between exists() and read; degrade to empty instead of 500
+            input_text = ""
     else:
         # every stored official case participates in a remote run; the site
         # expects all case inputs newline-concatenated under data_input
@@ -820,6 +881,7 @@ def import_site(payload: ImportSitePayload):
 
     imported = 0
     skipped = 0
+    records = []
     for item in items:
         if not item.get("submission_id") or get_archive().has_submission(item["submission_id"]):
             skipped += 1
@@ -841,6 +903,14 @@ def import_site(payload: ImportSitePayload):
             record["timestamp"] = datetime.fromtimestamp(
                 int(item["timestamp"]), tz=timezone.utc
             ).isoformat(timespec="seconds")
+        records.append(record)
+
+    # the site feed is newest-first, but Archive.query derives its
+    # newest-first listing from file append order: append oldest-first so the
+    # batch lands in true chronological position (ISO UTC strings sort
+    # lexically - both write paths stamp the same format)
+    records.sort(key=lambda record: str(record.get("timestamp", "")))
+    for record in records:
         get_archive().append(record)
         imported += 1
 
@@ -862,28 +932,35 @@ def clear_local_data():
 
     from lc.config import INSTANCE_LOCK_NAME, app_dir
 
-    root = app_dir()
-    cleared = []
-    if root.exists():
-        keep = {INSTANCE_LOCK_NAME}
-        for entry in sorted(root.iterdir()):
-            if entry.name in keep:
-                continue
-            try:
-                if entry.is_dir():
-                    import shutil
+    # hold the same lock start_sync uses: either begin() wins and the
+    # running-check above sees it (409), or this wipe completes first and
+    # the later sync starts fresh on an empty directory - no interleaving
+    with _lifecycle_lock:
+        root = app_dir()
+        cleared = []
+        if root.exists():
+            keep = {INSTANCE_LOCK_NAME}
+            for entry in sorted(root.iterdir()):
+                if entry.name in keep:
+                    continue
+                try:
+                    if entry.is_dir():
+                        import shutil
 
-                    shutil.rmtree(entry)
-                else:
-                    entry.unlink()
-                cleared.append(entry.name)
-            except OSError as exc:
-                logger.warning("could not remove %s: %s", entry, exc)
+                        shutil.rmtree(entry)
+                    else:
+                        entry.unlink()
+                    cleared.append(entry.name)
+                except OSError as exc:
+                    logger.warning("could not remove %s: %s", entry, exc)
 
-    auth.reset_state()
-    global _archive
-    with _archive_lock:
-        _archive = None
+        auth.reset_state()
+        global _archive
+        with _archive_lock:
+            _archive = None
+        # stale engine accumulators would otherwise surface as a bogus
+        # "resumable" progress snapshot pointing at wiped data
+        _sync_engine.reset()
     logger.info("local data cleared: %s", cleared)
     return {"cleared": cleared, "data_dir": str(root)}
 
@@ -895,7 +972,9 @@ def clear_local_data():
 @app.get("/{full_path:path}", include_in_schema=False)
 def spa_fallback(full_path: str):
     if full_path == "api" or full_path.startswith("api/"):
-        raise HTTPException(status_code=404, detail=t("problem_not_found"))
+        # generic not-found: this fallback only sees paths no route matched,
+        # which is a client typo, not a missing problem
+        raise HTTPException(status_code=404, detail="not found")
 
     if DIST_DIR is not None:
         dist_root = DIST_DIR.resolve()

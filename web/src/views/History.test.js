@@ -18,6 +18,7 @@ vi.mock('vue-router', () => ({
 }))
 
 import History from './History.vue'
+import { useI18nStore } from '../stores/i18n'
 
 const RECORDS = [
   {
@@ -60,14 +61,17 @@ describe('History view', () => {
     localStorage.clear()
   })
 
-  it('lists archived submissions newest first with verdict chips', async () => {
+  it('lists archived submissions newest first with localized verdict chips', async () => {
     apiMocks.archiveRecent.mockResolvedValue({ records: RECORDS })
+    useI18nStore().set('zh')
     const wrapper = await mountHistory()
     // top-level rows only; the expandable WA detail nests its own table
     const rows = wrapper.findAll('[data-testid="history-table"] > tbody > tr')
     expect(rows).toHaveLength(2)
-    expect(wrapper.text()).toContain('accepted')
-    expect(wrapper.text()).toContain('wrong_answer')
+    // status keys render through the shared verdict catalog, not raw enums
+    expect(wrapper.text()).toContain('通过')
+    expect(wrapper.text()).toContain('答案错误')
+    expect(wrapper.text()).not.toContain('wrong_answer')
     expect(wrapper.text()).toContain('52 ms')
     expect(apiMocks.archiveRecent).toHaveBeenCalledWith({ limit: 100, qid: undefined })
   })

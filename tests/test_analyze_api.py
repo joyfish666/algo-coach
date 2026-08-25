@@ -226,6 +226,40 @@ def test_import_site_dedupes_by_submission_id(client, monkeypatch):
     assert by_sid["100"]["difficulty"] == "easy"
 
 
+def test_import_site_appends_in_chronological_order(client, monkeypatch):
+    """Regression: the site feed is newest-first, but Archive.query derives
+    its listing from file append order - appending in feed order put the
+    batch's oldest record in the newest position once truncated."""
+    seed_cache()
+    items = [
+        {"submission_id": "900", "slug": "two-sum", "frontend_id": "1",
+         "title_cn": "", "title_en": "", "status": "Accepted", "lang": "cpp",
+         "timestamp": "1755900200"},
+        {"submission_id": "901", "slug": "lrn", "frontend_id": "146",
+         "title_cn": "", "title_en": "", "status": "Accepted", "lang": "cpp",
+         "timestamp": "1755900100"},
+        {"submission_id": "902", "slug": "two-sum", "frontend_id": "1",
+         "title_cn": "", "title_en": "", "status": "Wrong Answer", "lang": "cpp",
+         "timestamp": "1755900000"},
+    ]
+    monkeypatch.setattr(api_module, "create_adapter", lambda: FakeImportAdapter(items))
+
+    response = client.post("/api/archive/import-site", json={"limit": 20}, headers=ORIGIN)
+    assert response.status_code == 200
+
+    from lc.config import archive_path
+
+    lines = archive_path().read_text(encoding="utf-8").strip().splitlines()
+    timestamps = [json.loads(line)["timestamp"] for line in lines]
+    assert timestamps == sorted(timestamps)
+    # file order (oldest append first) matches the chronological expectation
+    assert [json.loads(line)["submission_id"] for line in lines] == ["902", "901", "900"]
+
+    records = client.get("/api/archive/recent?limit=2", headers=ORIGIN).json()["records"]
+    # newest-first view starts with the genuinely newest submission
+    assert [r["submission_id"] for r in records] == ["900", "901"]
+
+
 def test_archive_recent_respects_limit(client):
     archive = api_module.get_archive()
     for i in range(6):

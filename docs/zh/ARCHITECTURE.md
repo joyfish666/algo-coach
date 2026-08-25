@@ -6,7 +6,11 @@
 web (Vue 3 SPA)  ↔  server/api.py (FastAPI 薄封装)  ↔  lc (核心业务层)  ↔  sites/cn.py (leetcode.cn 适配)
 ```
 
-- **web/**：Vue 3 + Vite + Pinia + Vue Router + CodeMirror 6；构建产物 `web/dist` 由 FastAPI 静态托管；开发模式 Vite :5173 proxy `/api` → :8000。全局通知走 toast store（成功自动消退、错误驻留至手动关闭）；同步轮询由应用级 sync store 持有，跨路由存活、页面刷新后自动重新接管进行中的后端同步。
+- **web/**：Vue 3 + Vite + Pinia + Vue Router + CodeMirror 6（语法高亮经 @lezer/highlight
+  双调色板随 data-theme 切换）；构建产物 `web/dist` 由 FastAPI 静态托管；开发模式 Vite :5173
+  proxy `/api` → :8000。全局通知走 toast store（成功自动消退、错误驻留至手动关闭）；
+  同步轮询由应用级 sync store 持有，跨路由存活、页面刷新后自动重新接管进行中的后端同步；
+  判定文案/语义色由共享 utils/verdict.js 单点映射（工作台结果面板与历史页共用）。
 - **server/api.py**：REST 层。领域异常翻译为结构化错误 JSON；SPA catch-all 回退 index.html（`relative_to` 严格限制在 dist 内）；Host（含 IPv6 括号格式）/ Origin 校验中间件——写方法要求白名单本地 Origin（含 Vite dev 来源 `http://localhost:5173`），GET 免 Origin 但 Host 必须本地（防 DNS rebinding），`{qid}` 入口统一做 slug 字符白名单校验；带阻塞网络 IO 的长端点一律普通 def 走线程池。
 - **lc/**：与 UI 框架解耦的核心业务层：config / auth / httpclient / exceptions / logutil / i18n / langs / problems / judge / archive / favorites / llm。
 - **sites/cn.py**：所有 GraphQL 响应解析单点收口，字段缺失降级为清晰报错而非崩溃。
@@ -48,9 +52,11 @@ submission_id 三条写入路径全覆盖（判题完成 / 超时 unknown 归档
 ```
 GET  /api/status                    配置状态/版本/站点信息/同步进度快照
 POST /api/setup/validate-cookie     引导页即时校验
-GET  /api/settings                  读取（敏感字段脱敏，仅回显尾 4 字符）
-PUT  /api/settings                  更新（Cookie 变更即时重建会话；
-                                    request_interval 限定 [0.5, 60] 秒，越界 422）
+GET  /api/settings                  读取（敏感字段脱敏：<16 字符全遮，否则仅回显尾 4 字符）
+PUT  /api/settings                  更新（Cookie 变更即时重建会话；任何字段显式传 null
+                                    一律 422——省略该字段才表示不修改；
+                                    request_interval 限定 [0.5, 60] 秒、llm_timeout 限定
+                                    [5, 600] 秒，越界 422）
 GET  /api/problems                  全量返回本地缓存（筛选分页由前端执行）；
                                     每行按归档索引富化 practice_status/last_practice_at，
                                     并按收藏索引附加 favorite 标记
@@ -62,24 +68,30 @@ GET  /api/daily                     每日一题
 GET  /api/problem/{qid}             打开题目：本地已落盘则纯读；未落盘时惰性物化
                                     （抓取一次并写入工作区/缓存），此后离线可读
 POST /api/problem/{qid}/refresh     显式重抓题目详情并刷新工作区（用户编辑过的文件先 .bak 备份）
-GET  /api/problem/{qid}/template    ?lang=cpp 按需抓取该语言模板并落盘
+GET  /api/problem/{qid}/template    ?lang= 按需抓取该语言模板并落盘；省略时用配置的
+                                    default_language（与其他端点同一默认来源）
 PUT  /api/problem/{qid}/solution    编辑器代码落盘（debounce 自动保存/保存即判定共用）
 PUT  /api/problem/{qid}/testcases   自定义用例面板保存
 PUT  /api/problem/{qid}/notes       笔记落盘 notes.md
 PUT  /api/problem/{qid}/favorite    收藏切换 {favorite: bool}（写 favorites.json 索引）
 POST /api/judge/run                 {qid, lang, code, use_local?} 先落盘再判定，不进提交历史；
-                                    远程运行合并 cases.json 全部官方示例（data_input 换行拼接）
+                                    远程运行合并 cases.json 全部官方示例（data_input 换行拼接）；
+                                    题目缺内部题号时显式 422（judge_missing_question_id），
+                                    绝不回退 slug 发出必然失败的请求
 POST /api/judge/submit              {qid, lang, code} 阻塞长轮询至判定完成或超时；
                                     完成后自动归档；超时走「结果未知」路径并归档
 GET  /api/archive/recent            本地归档最近记录；?qid= 按题目过滤、?limit≤200，
                                     统一走 Archive.query() 加锁扫描原语（newest-first）
 POST /api/archive/import-site       submissionList 导入（≤20 条边界，去重键 = submission_id，
-                                    状态分类与判题共用 cn.classify_status_text 单一来源）
+                                    状态分类与判题共用 cn.classify_status_text 单一来源；
+                                    批次按时间戳升序追加，维持文件「追加序=时间序」不变量）
 POST /api/ask                       无状态问答 {question, history?, qid, code?, lang?}——
                                     题目与最近判定自动入上下文；code 为用户显式附带当前代码（截断 6000 字符）
 POST /api/analyze                   解题统计 + 标签掌握度 + 推荐 + AI 报告（use_llm 可关）
 DELETE /api/local-data              清除全部本地数据（题库缓存/归档/工作区/配置），
-                                    同步进行中返回 409；保留运行中的 instance.lock
+                                    同步进行中返回 409；保留运行中的 instance.lock；
+                                    与 sync 启动共用 _lifecycle_lock 互斥（无 TOCTOU），
+                                    清除时重置同步引擎累加器；前端同时清除浏览器侧草稿快照
 
 GET  /{path}                        前端托管：命中 dist 文件直出，SPA 深链回退 index.html；
                                     index.html no-cache、哈希资源 immutable 长缓存；
