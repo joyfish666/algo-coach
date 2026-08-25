@@ -8,7 +8,9 @@ All data — cookies, configs, submission archives — stays on your machine. No
 
 ## Features
 
-- Guided `/setup` wizard: paste your cookie, validate it instantly, optionally configure an LLM key
+- Guided `/setup` wizard: paste your cookie, validate it instantly, set your preferences;
+  LLM configuration lives separately in Settings with a one-click connection test and a
+  thinking-mode control
 - Full problem-list sync with local caching and app-level progress feedback that survives page
   switches and reloads; practice-status / difficulty / tag / keyword filters, random pick,
   favorites and a compact density mode
@@ -21,7 +23,7 @@ All data — cookies, configs, submission archives — stays on your machine. No
 - Daily problem shortcut; analytics dashboard with tag-mastery chart, recommendations and an AI
   weakness report (bring your own key)
 - Stateless AI coach sidebar on every problem, aware of your latest verdict, with opt-in
-  attachment of the current editor code
+  attachment of the current editor code and a one-click clear-conversation button
 - Local submission archive (JSON Lines) with site-side import; accepted status derived per problem
 - Bilingual UI (zh/en); light/dark design system with semantic success/warning/danger colors;
   unified toast notifications (errors persist until dismissed); uniform frontend request timeouts

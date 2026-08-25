@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### UI minimalism & decoupled LLM settings (2026-08-26)
+
+**Features**
+
+- LLM configuration moved out of the `/setup` wizard (now cookie + preferences only) into a
+  dedicated Settings card: API key / base URL / model, editable independently of the cookie
+  at any time.
+- `POST /api/llm/test` connectivity probe: sends a tiny `max_tokens`-capped ping using the
+  form values as overrides (omitted fields fall back to saved config), 30s timeout cap;
+  the settings card shows model + measured latency on success and the provider's error
+  message on failure. Testing never saves - an explicit save button persists the values.
+- Thinking-mode control (`llm_thinking: default/off/low/medium/high`): non-default levels
+  map to the common OpenAI-compatible conventions (`enable_thinking`, `reasoning_effort`);
+  `default` sends nothing, keeping strict providers safe. Validated on `PUT /api/settings`
+  (422 otherwise), honored by the probe, env override `ALGOCOACH_LLM_THINKING`.
+- AI coach panel: clear-conversation button in the header (disabled while a reply is
+  pending or the conversation is empty); excluded from the drag handle.
+- Minimalist white UI pass: white sidebar with hairline divider and gray-pill active nav,
+  near-black primary buttons, larger card radius with lighter borders, eyebrow-style
+  uppercase labels, theme/language switches unified at a 32px control height.
+
+**Bug fixes (root-caused)**
+
+- `POST /api/analyze` computed `ai_configured` only inside the `use_llm=true` branch, but
+  the page's initial load always passes `use_llm=false` - the AI report button could never
+  appear even with a perfectly saved key. Availability is now derived from the saved
+  config, decoupled from whether this request generates a report (regression test added).
+- `coach` crashed at startup with `TypeError: Config.__init__() got an unexpected keyword
+  argument 'sock'`: `uvicorn.Config` never accepted `sock`. The pre-bound listener is now
+  handed over via `server.run(sockets=[sock])`, preserving the port TOCTOU protection
+  (pitfall recorded).
+
 ### Fourth review pass: user/developer double-angle audit (2026-08-25)
 
 **Bug fixes (root-caused, backend)**

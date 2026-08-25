@@ -101,6 +101,19 @@
 | UI | 小项集中修：AI 面板 Esc 关闭+越界重钳制（原 clamp 允许下缘出屏 120px）、status 启动双请求合并、theme 监听防堆叠、sync 轮询防重叠、debug 关闭还原 console.error、Vue 渲染错误进调试日志、/setup 页不再叠加全局 Cookie 失效横幅、导入成功/失败同色、掌握度图 tooltip 补全名与数字含义、🎲 emoji 换 SVG 图标、判定面板隐藏无意义的 "0 / 0"、死标记清理 | 各自独立的小型一致性缺陷，逐一对齐既有设计约定 |
 | 测试 | 后端 204→216（settings null 矩阵 / llm_timeout 边界 / mask 阈值 / 引擎重置 / 缺 id 显式失败 / 无 .tmp 残留 / 导入时序 / 陈旧 client 禁写 / 键对保留 / env 校验指名）；前端 80→89（IME 组合、Esc+重钳制、报告跨刷新保留、行内生成错误、快照清除、本地化历史 chip、JudgeResultPanel 首个直测套件） | 上表每项修复各配回归测试，非法输入维度的盲区与缺陷一一对应 |
 
+### 第五批（UI 极简化 + LLM 设置解耦，2026-08-26）
+
+| 类别 | 交付/修复 | 根因 |
+|---|---|---|
+| 功能 | LLM 配置从 `/setup` 向导（3 步→2 步：Cookie+偏好）解耦到设置页独立「AI（LLM）」卡片：Key/地址/模型随时可改，与 Cookie 互不影响 | LLM 与 Cookie 生命周期完全不同（Cookie 会过期、LLM 是增值能力），捆在首启向导里导致「改个 Key 要重走向导」且设置页无表单可改 |
+| 功能 | `POST /api/llm/test` 连通性探测：表单值覆盖已存配置（缺省回退）、`max_tokens` 限幅 ping、30s 超时上限；卡片显示模型名+实测延迟或服务端错误原文 | 「保存后才知道配得对不对」反馈链太长；测试与保存分离（测试不落盘） |
+| 功能 | 思考模式 `llm_thinking`（default/off/low/medium/high）：非默认档映射 OpenAI 兼容 `enable_thinking`+`reasoning_effort`，default 不发任何额外字段；PUT 校验 422；环境变量 `ALGOCOACH_LLM_THINKING`；「测试连接」承担验证 | 各厂商思考参数四套标准且严格服务商对未知字段 400 → 只映射最大公约数、默认档绝对安全（PITFALLS 已回填兼容性矩阵） |
+| UI | 极简白风格落地：白色侧边栏+发丝分割线+灰色胶囊激活态、近黑主按钮、卡片大圆角轻描边、eyebrow 大写小标签、主题/语言开关统一 32px 控件高度 | 视觉噪声来自灰底侧栏/彩色主按钮/过重描边等执行层细节，而非配色 token 本身 |
+| UI | AI 教练面板标题栏「清空对话」按钮（回复中/空会话禁用，不干扰拖拽） | 长对话只能靠切题重置，无主动清空入口 |
+| 逻辑 | `POST /api/analyze` 的 `ai_configured` 只在 `use_llm=true` 分支计算，而页面初载恒传 `use_llm=false` → 报告按钮永不出现（Key 已保存也显示「未配置」） | 可用性判定与「本次是否生成」两个正交概念被写进同一分支 → `ai_configured` 恒由保存配置推导（附回归测试） |
+| 逻辑 | `coach` 启动即崩：`uvicorn.Config(sock=...)` 从不接受该参数 | 预绑定 socket 应走 `Server.run(sockets=[...])`；真实启动路径无测试覆盖 → 修复并回填 PITFALLS |
+| 测试 | 后端 216→227（llm/test 六用例：未配置 400/保存配置/payload 覆盖/部分回退/NetworkError→502/未知字段 422；thinking 映射与校验；analyze ai_configured 回归）；前端 89→90（清空对话按钮状态机） | 新端点与映射逻辑逐分支配测试；测试污染（类属性赋值泄漏）改用 monkeypatch 自动还原 |
+
 ### 登记【延】
 
 - **浏览器级 E2E（Playwright 等）**：当前以路由 smoke（全部懒加载 chunk 可解析 +

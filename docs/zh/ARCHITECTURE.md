@@ -56,7 +56,8 @@ GET  /api/settings                  读取（敏感字段脱敏：<16 字符全�
 PUT  /api/settings                  更新（Cookie 变更即时重建会话；任何字段显式传 null
                                     一律 422——省略该字段才表示不修改；
                                     request_interval 限定 [0.5, 60] 秒、llm_timeout 限定
-                                    [5, 600] 秒，越界 422）
+                                    [5, 600] 秒、llm_thinking 限定
+                                    default/off/low/medium/high，越界 422）
 GET  /api/problems                  全量返回本地缓存（筛选分页由前端执行）；
                                     每行按归档索引富化 practice_status/last_practice_at，
                                     并按收藏索引附加 favorite 标记
@@ -87,7 +88,12 @@ POST /api/archive/import-site       submissionList 导入（≤20 条边界，�
                                     批次按时间戳升序追加，维持文件「追加序=时间序」不变量）
 POST /api/ask                       无状态问答 {question, history?, qid, code?, lang?}——
                                     题目与最近判定自动入上下文；code 为用户显式附带当前代码（截断 6000 字符）
-POST /api/analyze                   解题统计 + 标签掌握度 + 推荐 + AI 报告（use_llm 可关）
+POST /api/llm/test                  LLM 连通性探测：payload 字段（llm_api_key/base_url/
+                                    model/thinking）覆盖已保存配置、缺省回退，发一条
+                                    max_tokens 限幅的 ping；未配置 400，失败走
+                                    NetworkError → 502 结构化错误
+POST /api/analyze                   解题统计 + 标签掌握度 + 推荐 + AI 报告（use_llm 可关；
+                                    ai_configured 恒由保存的配置推导，与本次是否生成解耦）
 DELETE /api/local-data              清除全部本地数据（题库缓存/归档/工作区/配置），
                                     同步进行中返回 409；保留运行中的 instance.lock；
                                     与 sync 启动共用 _lifecycle_lock 互斥（无 TOCTOU），

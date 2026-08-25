@@ -89,6 +89,17 @@
   字符集非法」的载荷测（如 `two.sum`）。（2026-08-24 已验证）
 - **AbortSignal.timeout 需降级路径**：前端 fetch 统一加截止时间防「后端挂起永不返回」，
   但旧浏览器无该 API——封装处检测其存在性，缺失时退化为无超时而不是整个请求报错。
+- **uvicorn 预绑定 socket 走 `Server.run(sockets=[...])` 而非 `Config(sock=)`**（2026-08-26 已修复）：
+  `uvicorn.Config` 从不接受 `sock` 参数（只有 `fd`），传了会在启动瞬间
+  `TypeError: unexpected keyword argument`——且只在真实启动路径暴露，单测若不真跑
+  `server.run()` 根本抓不到。正确姿势：`uvicorn.Server(config)` 后
+  `server.run(sockets=[sock])`，Config 里的 host/port 此时仅是兜底描述。
+- **思考（thinking）参数没有跨厂商标准**（2026-08-26 落地时的设计约束）：DeepSeek 用
+  独立模型名（deepseek-reasoner）、Qwen/DashScope 用 `enable_thinking`、GLM 用
+  `thinking.type`、OpenAI 系用 `reasoning_effort`——同一语义四套参数，且严格校验的
+  服务商对未知字段直接 400。因此 `llm_thinking` 的非默认档只映射最通用的 OpenAI 兼容
+  约定（`enable_thinking` + `reasoning_effort`），`default` 档**一个额外字段都不发**；
+  新增档位/字段前先想清楚这个兼容性矩阵，并让「测试连接」承担验证职责。
 - **双 coach 实例并存**：由单实例守卫杜绝（绑定失败探测拒启 + instance.lock 锁文件封堵
   「端口顺延后新实例直接绑成功」盲区）；锁仅用于实例互斥而非数据文件加锁。若守卫被绕过仍按
   jsonl 单次小写入（O_APPEND 级别）接受 last-wins。
