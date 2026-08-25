@@ -129,12 +129,31 @@ def test_llm_test_translates_network_error(client, monkeypatch):
     def boom(self, messages, *, max_tokens=None):
         raise NetworkError("LLM HTTP 401: bad key")
 
-    FakeLLM.chat = boom
+    # monkeypatch (not bare assignment) so the class is restored for later tests
+    monkeypatch.setattr(FakeLLM, "chat", boom)
     response = client.post("/api/llm/test", json={}, headers=ORIGIN)
     assert response.status_code == 502
     error = response.json()["error"]
     assert error["kind"] == "NetworkError"
     assert "401" in error["message"]
+
+
+def test_llm_test_passes_thinking_override(client, monkeypatch):
+    seed_config_llm()
+    monkeypatch.setattr(api_module, "LLMClient", lambda **kwargs: FakeLLM(**kwargs))
+
+    response = client.post("/api/llm/test", json={"llm_thinking": "high"}, headers=ORIGIN)
+    assert response.status_code == 200
+    assert FakeLLM.captured_kwargs["thinking"] == "high"
+
+
+def test_settings_llm_thinking_validation(client):
+    bad = client.put("/api/settings", json={"llm_thinking": "extreme"}, headers=ORIGIN)
+    assert bad.status_code == 422
+
+    ok = client.put("/api/settings", json={"llm_thinking": "low"}, headers=ORIGIN)
+    assert ok.status_code == 200
+    assert ok.json()["llm_thinking"] == "low"
 
 
 def test_llm_test_rejects_unknown_fields(client):

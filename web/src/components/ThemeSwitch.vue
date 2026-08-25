@@ -83,8 +83,9 @@ button {
   border: none;
   color: var(--gray-neutral);
   display: flex;
+  height: 32px;
   justify-content: center;
-  padding: var(--space-2) var(--space-3);
+  padding: 0 var(--space-3);
 }
 
 button + button {

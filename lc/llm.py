@@ -5,6 +5,15 @@ disables rate limiting and site-specific header injection (UA/csrf/Referer do
 not apply to user-configured endpoints). Request timeout is separate and
 configurable (llm_timeout, default 120s) because long answers take tens of
 seconds. v0.1 is non-streaming.
+
+Thinking control: there is no single cross-provider standard for hybrid
+thinking models, so `thinking` maps to the two most common OpenAI-compatible
+conventions and "default" sends nothing at all (always safe):
+- "off"            -> enable_thinking=false (Qwen/DashScope-style hybrid switch)
+- "low|medium|high"-> enable_thinking=true + reasoning_effort=<level>
+Strict providers that reject unknown fields may 400 on the non-default
+values; the connection test in settings lets the user verify before relying
+on it.
 """
 
 from __future__ import annotations
@@ -13,6 +22,13 @@ import requests
 
 from lc.exceptions import NetworkError
 from lc.logutil import logger
+
+THINKING_LEVELS = ("off", "low", "medium", "high")
+
+
+def normalize_thinking(value: str) -> str:
+    value = (value or "").strip().lower()
+    return value if value in THINKING_LEVELS else "default"
 
 
 def normalize_base_url(base_url: str) -> str:
@@ -32,17 +48,27 @@ class LLMClient:
         api_key: str,
         model: str = "deepseek-v4-flash",
         timeout: float = 120.0,
+        thinking: str = "default",
     ):
         self.endpoint = normalize_base_url(base_url)
         self.api_key = api_key
         self.model = model or "deepseek-v4-flash"
         self.timeout = float(timeout)
+        self.thinking = normalize_thinking(thinking)
+
+    def _thinking_fields(self) -> dict:
+        if self.thinking == "off":
+            return {"enable_thinking": False}
+        if self.thinking in ("low", "medium", "high"):
+            return {"enable_thinking": True, "reasoning_effort": self.thinking}
+        return {}
 
     def chat(self, messages: list, *, max_tokens: int | None = None) -> str:
         payload = {
             "model": self.model,
             "messages": list(messages),
             "stream": False,
+            **self._thinking_fields(),
         }
         # connectivity probes pass a tiny cap so a ping stays cheap
         if max_tokens is not None:

@@ -43,6 +43,30 @@ def test_normalize_base_url_variants():
         normalize_base_url("  ")
 
 
+def test_normalize_thinking_rejects_unknown():
+    from lc.llm import normalize_thinking
+
+    assert normalize_thinking(" HIGH ") == "high"
+    assert normalize_thinking("off") == "off"
+    assert normalize_thinking("bogus") == "default"
+    assert normalize_thinking("") == "default"
+
+
+def test_chat_thinking_fields_mapping(capture_post):
+    # default sends nothing: always safe against strict providers
+    LLMClient(base_url="https://api.x.com/v1", api_key="k").chat([])
+    assert "enable_thinking" not in capture_post["json"]
+    assert "reasoning_effort" not in capture_post["json"]
+
+    LLMClient(base_url="https://api.x.com/v1", api_key="k", thinking="off").chat([])
+    assert capture_post["json"]["enable_thinking"] is False
+    assert "reasoning_effort" not in capture_post["json"]
+
+    LLMClient(base_url="https://api.x.com/v1", api_key="k", thinking="high").chat([])
+    assert capture_post["json"]["enable_thinking"] is True
+    assert capture_post["json"]["reasoning_effort"] == "high"
+
+
 def test_chat_success_and_request_shape(capture_post):
     client = LLMClient(base_url="https://api.x.com/v1", api_key="sk-1", model="m1", timeout=7)
     answer = client.chat([{"role": "user", "content": "hi"}])

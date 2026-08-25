@@ -65,7 +65,7 @@ function onGlobalKeydown(event) {
 }
 
 function startDrag(event) {
-  if (event.target.closest('.close')) return
+  if (event.target.closest('.head-actions')) return
   event.preventDefault()
   const rect = panelEl.value?.getBoundingClientRect()
   const fallbackWidth = rect?.width || 340
@@ -121,6 +121,11 @@ watch(
     attachCode.value = false
   }
 )
+
+function clearConversation() {
+  if (pending.value || !messages.value.length) return
+  messages.value = []
+}
 
 async function toggle() {
   open.value = !open.value
@@ -193,9 +198,21 @@ function onEnter(event) {
   >
     <header class="panel-head" @mousedown="startDrag">
       <h2>{{ i18n.t('ai_title') }}</h2>
-      <button class="close" type="button" :title="i18n.t('ai_close')" @click="toggle">
-        ✕
-      </button>
+      <div class="head-actions">
+        <button
+          class="clear"
+          type="button"
+          :title="i18n.t('ai_clear')"
+          :disabled="pending || !messages.length"
+          data-testid="ai-clear"
+          @click="clearConversation"
+        >
+          {{ i18n.t('ai_clear') }}
+        </button>
+        <button class="close" type="button" :title="i18n.t('ai_close')" @click="toggle">
+          ✕
+        </button>
+      </div>
     </header>
     <p class="context-hint">{{ i18n.t('ai_context_hint') }}</p>
 
@@ -302,10 +319,34 @@ function onEnter(event) {
   margin-bottom: 0;
 }
 
+.head-actions {
+  align-items: center;
+  display: flex;
+  gap: var(--space-2);
+}
+
+.clear {
+  background: transparent;
+  border: none;
+  color: var(--gray-neutral);
+  cursor: pointer;
+  font-size: var(--font-size-caption);
+}
+
+.clear:hover:not(:disabled) {
+  color: var(--danger);
+}
+
+.clear:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
 .close {
   background: transparent;
   border: none;
   color: var(--gray-neutral);
+  cursor: pointer;
   font-size: var(--font-size-title);
 }
 

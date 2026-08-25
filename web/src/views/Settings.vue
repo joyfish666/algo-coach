@@ -26,6 +26,7 @@ const saveError = ref('')
 const llmKey = ref('')
 const llmBaseUrl = ref('')
 const llmModel = ref('')
+const llmThinking = ref('default')
 const hasLlmKey = ref(false)
 const savingLlm = ref(false)
 const llmSavedAt = ref('')
@@ -48,6 +49,7 @@ onMounted(async () => {
     cookieConfigured.value = Boolean(settings.configured)
     llmBaseUrl.value = settings.llm_base_url || ''
     llmModel.value = settings.llm_model || ''
+    llmThinking.value = settings.llm_thinking || 'default'
     hasLlmKey.value = Boolean(settings.llm_api_key_masked)
   } catch {
     cookieConfigured.value = null
@@ -77,12 +79,14 @@ async function saveLlm() {
     const payload = {
       llm_base_url: llmBaseUrl.value.trim(),
       llm_model: llmModel.value.trim(),
+      llm_thinking: llmThinking.value,
     }
     if (llmKey.value.trim()) payload.llm_api_key = llmKey.value.trim()
     const updated = await api.putSettings(payload)
     hasLlmKey.value = Boolean(updated.llm_api_key_masked)
     llmBaseUrl.value = updated.llm_base_url || ''
     llmModel.value = updated.llm_model || ''
+    llmThinking.value = updated.llm_thinking || 'default'
     llmKey.value = ''
     llmSavedAt.value = i18n.formatDateTime(new Date())
   } catch (err) {
@@ -107,6 +111,7 @@ async function testLlm() {
   if (llmKey.value.trim()) payload.llm_api_key = llmKey.value.trim()
   if (llmBaseUrl.value.trim()) payload.llm_base_url = llmBaseUrl.value.trim()
   if (llmModel.value.trim()) payload.llm_model = llmModel.value.trim()
+  if (llmThinking.value && llmThinking.value !== 'default') payload.llm_thinking = llmThinking.value
   const startedAt = performance.now()
   try {
     const result = await api.testLlm(payload)
@@ -229,6 +234,19 @@ async function eraseAllData() {
           placeholder="deepseek-v4-flash"
           data-testid="llm-model-input"
         />
+      </div>
+      <div class="field">
+        <span class="field-label">{{ i18n.t('llm_thinking') }}</span>
+        <div class="row">
+          <select v-model="llmThinking" class="select" data-testid="llm-thinking-select">
+            <option value="default">{{ i18n.t('llm_think_default') }}</option>
+            <option value="off">{{ i18n.t('llm_think_off') }}</option>
+            <option value="low">{{ i18n.t('llm_think_low') }}</option>
+            <option value="medium">{{ i18n.t('llm_think_medium') }}</option>
+            <option value="high">{{ i18n.t('llm_think_high') }}</option>
+          </select>
+          <span class="hint-text">{{ i18n.t('llm_thinking_hint') }}</span>
+        </div>
       </div>
       <div class="row">
         <button class="btn btn-primary" type="button" :disabled="savingLlm" data-testid="llm-save" @click="saveLlm">

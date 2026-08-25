@@ -35,11 +35,14 @@ const i18n = useI18nStore()
 }
 
 button {
+  align-items: center;
   background: transparent;
   border: none;
   color: var(--gray-neutral);
+  display: flex;
   font-size: var(--font-size-caption);
-  padding: var(--space-1) var(--space-3);
+  height: 32px;
+  padding: 0 var(--space-3);
 }
 
 button + button {

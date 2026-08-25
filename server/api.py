@@ -284,6 +284,7 @@ def masked_settings(config: dict) -> dict:
         "llm_api_key_masked": mask_secret(config.get("llm_api_key", "")),
         "llm_base_url": config.get("llm_base_url", ""),
         "llm_model": config.get("llm_model", ""),
+        "llm_thinking": config.get("llm_thinking", "default"),
         "llm_timeout": config.get("llm_timeout", 120.0),
         "default_language": config.get("default_language", DEFAULT_LANGUAGE),
         "request_interval": config.get("request_interval", 2.0),
@@ -303,6 +304,7 @@ class SettingsUpdate(BaseModel):
     llm_api_key: str | None = None
     llm_base_url: str | None = None
     llm_model: str | None = None
+    llm_thinking: str | None = None
     llm_timeout: float | None = None
     default_language: str | None = None
     request_interval: float | None = None
@@ -360,6 +362,18 @@ def update_settings(payload: SettingsUpdate):
                     f"[{LLM_TIMEOUT_MIN}, {LLM_TIMEOUT_MAX}]: {timeout}"
                 ),
             )
+    if "llm_thinking" in updates:
+        from lc.llm import THINKING_LEVELS
+
+        if updates["llm_thinking"] not in ("default", *THINKING_LEVELS):
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "llm_thinking must be one of: default, "
+                    + ", ".join(THINKING_LEVELS)
+                    + f"; got {updates['llm_thinking']!r}"
+                ),
+            )
     if "cookie" in provided:
         from lc.auth import extract_csrf_token
 
@@ -387,6 +401,7 @@ class LlmTestPayload(BaseModel):
     llm_api_key: str | None = None
     llm_base_url: str | None = None
     llm_model: str | None = None
+    llm_thinking: str | None = None
 
 
 # A probe must feel snappy even when the saved llm_timeout is generous; 30s
@@ -410,10 +425,15 @@ def test_llm_endpoint(payload: LlmTestPayload):
     model = str(
         updates.get("llm_model", "") or config.get("llm_model", "") or "deepseek-v4-flash"
     )
+    thinking = str(
+        updates.get("llm_thinking", "") or config.get("llm_thinking", "") or "default"
+    )
     if not api_key or not base_url:
         raise HTTPException(status_code=400, detail=t("ask_not_configured"))
     timeout = min(float(config.get("llm_timeout", 120.0)), LLM_TEST_TIMEOUT_CAP)
-    llm = LLMClient(base_url=base_url, api_key=api_key, model=model, timeout=timeout)
+    llm = LLMClient(
+        base_url=base_url, api_key=api_key, model=model, timeout=timeout, thinking=thinking
+    )
     reply = llm.chat([{"role": "user", "content": "ping"}], max_tokens=8)
     return {"ok": True, "model": llm.model, "reply": reply[:80]}
 
@@ -772,6 +792,7 @@ def _build_llm() -> LLMClient:
         api_key=api_key,
         model=str(config.get("llm_model", "") or "deepseek-v4-flash"),
         timeout=float(config.get("llm_timeout", 120.0)),
+        thinking=str(config.get("llm_thinking", "") or "default"),
     )
 
 

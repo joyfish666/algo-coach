@@ -28,6 +28,26 @@ describe('ai chat sidebar', () => {
     askMock.mockReset()
   })
 
+  it('clears the conversation via the header button and disables itself when empty', async () => {
+    askMock.mockResolvedValue({ answer: '思路：哈希表' })
+    const wrapper = mountPanel()
+    await wrapper.find('[data-testid="ai-open"]').trigger('click')
+
+    // nothing to clear yet
+    expect(wrapper.find('[data-testid="ai-clear"]').attributes('disabled')).toBeDefined()
+
+    await wrapper.find('textarea').setValue('怎么解？')
+    await wrapper.find('button.btn-primary').trigger('click')
+    await flushPromises()
+    expect(wrapper.findAll('.bubble').length).toBe(2)
+
+    await wrapper.find('[data-testid="ai-clear"]').trigger('click')
+    expect(wrapper.findAll('.bubble').length).toBe(0)
+    expect(wrapper.find('.empty').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="ai-clear"]').attributes('disabled')).toBeDefined()
+    wrapper.unmount()
+  })
+
   it('clears the conversation when the problem changes', async () => {
     askMock.mockResolvedValue({ answer: '思路：哈希表' })
     const wrapper = mountPanel()
