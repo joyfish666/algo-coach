@@ -381,6 +381,43 @@ def update_settings(payload: SettingsUpdate):
     return masked_settings(effective_config())
 
 
+class LlmTestPayload(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    llm_api_key: str | None = None
+    llm_base_url: str | None = None
+    llm_model: str | None = None
+
+
+# A probe must feel snappy even when the saved llm_timeout is generous; 30s
+# still clears slow cold-start endpoints but never hangs the settings page.
+LLM_TEST_TIMEOUT_CAP = 30.0
+
+
+@app.post("/api/llm/test")
+def test_llm_endpoint(payload: LlmTestPayload):
+    """One-shot LLM connectivity probe.
+
+    Fields provided in the payload override the saved config, so the settings
+    form can verify what the user just typed before saving; omitted fields
+    fall back to the saved values. Uses a tiny max_tokens cap to keep the
+    probe cheap.
+    """
+    config = effective_config()
+    updates = payload.model_dump(exclude_unset=True)
+    api_key = str(updates.get("llm_api_key", "") or config.get("llm_api_key", "") or "")
+    base_url = str(updates.get("llm_base_url", "") or config.get("llm_base_url", "") or "")
+    model = str(
+        updates.get("llm_model", "") or config.get("llm_model", "") or "deepseek-v4-flash"
+    )
+    if not api_key or not base_url:
+        raise HTTPException(status_code=400, detail=t("ask_not_configured"))
+    timeout = min(float(config.get("llm_timeout", 120.0)), LLM_TEST_TIMEOUT_CAP)
+    llm = LLMClient(base_url=base_url, api_key=api_key, model=model, timeout=timeout)
+    reply = llm.chat([{"role": "user", "content": "ping"}], max_tokens=8)
+    return {"ok": True, "model": llm.model, "reply": reply[:80]}
+
+
 # ---------------------------------------------------------------------------
 # problem list + sync
 
@@ -814,7 +851,11 @@ def analyze_endpoint(payload: AnalyzePayload):
     recommendations = recommend_problems(problems.load_problems()["problems"], latest_index, weak_tags)
 
     ai_report = None
-    ai_configured = False
+    # availability must be computed from config up front: the initial page
+    # load passes use_llm=false, and gating ai_configured on that flag used
+    # to report "LLM not configured" even with a perfectly saved key
+    config = effective_config()
+    ai_configured = bool(config.get("llm_api_key")) and bool(config.get("llm_base_url"))
     if payload.use_llm:
         try:
             llm = _build_llm()

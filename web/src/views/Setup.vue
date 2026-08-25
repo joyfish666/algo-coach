@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
 import PageHeader from '../components/PageHeader.vue'
@@ -22,22 +22,6 @@ const validating = ref(false)
 const cookieOk = ref(false)
 const cookieError = ref('')
 
-const llmKey = ref('')
-const llmBaseUrl = ref('https://api.deepseek.com')
-const llmModel = ref('deepseek-v4-flash')
-const hasSavedLlmKey = ref(false)
-
-async function loadExistingLlm() {
-  try {
-    const settings = await api.getSettings()
-    if (settings.llm_base_url) llmBaseUrl.value = settings.llm_base_url
-    if (settings.llm_model) llmModel.value = settings.llm_model
-    hasSavedLlmKey.value = Boolean(settings.llm_api_key_masked)
-  } catch {
-    /* backend unreachable; keep defaults */
-  }
-}
-
 const codingLang = ref('cpp')
 const finishing = ref(false)
 const done = ref(false)
@@ -49,11 +33,8 @@ const languages = [
   { value: 'java', label: 'Java' },
 ]
 
-const steps = computed(() => [
-  i18n.t('setup_step_cookie'),
-  i18n.t('setup_step_llm'),
-  i18n.t('setup_step_prefs'),
-])
+// LLM/API 配置已解耦到设置页；向导只负责 Cookie 与偏好
+const steps = computed(() => [i18n.t('setup_step_cookie'), i18n.t('setup_step_prefs')])
 
 const composedCookie = computed(() => {
   if (advancedMode.value) return cookieInput.value.trim()
@@ -86,28 +67,8 @@ async function validateAndNext() {
   }
 }
 
-onMounted(() => {
-  if (status.configured || status.loaded) {
-    loadExistingLlm()
-  }
-})
-
 function goStep(target) {
   step.value = target
-  if (target === 2) {
-    loadExistingLlm()
-  }
-}
-
-function skipLlm() {
-  llmKey.value = ''
-  llmBaseUrl.value = ''
-  llmModel.value = ''
-  goStep(3)
-}
-
-function llmProvided() {
-  return Boolean(llmKey.value.trim() || llmBaseUrl.value.trim() || llmModel.value.trim())
 }
 
 async function finish() {
@@ -117,11 +78,6 @@ async function finish() {
   const payload = {
     cookie: composedCookie.value,
     default_language: codingLang.value,
-  }
-  if (llmProvided()) {
-    payload.llm_api_key = llmKey.value.trim()
-    payload.llm_base_url = llmBaseUrl.value.trim()
-    payload.llm_model = llmModel.value.trim()
   }
   try {
     await api.putSettings(payload)
@@ -243,41 +199,6 @@ async function finish() {
         </div>
       </section>
 
-      <section v-else-if="step === 2" class="step-body">
-        <div class="field">
-          <span class="field-label">{{ i18n.t('llm_api_key') }}</span>
-          <input v-model="llmKey" class="input wide" type="password" autocomplete="off" />
-          <span v-if="hasSavedLlmKey" class="hint-text">{{ i18n.t('llm_key_saved_hint') }}</span>
-        </div>
-        <div class="field">
-          <span class="field-label">{{ i18n.t('llm_base_url') }}</span>
-          <input v-model="llmBaseUrl" class="input wide" placeholder="https://api.deepseek.com" />
-        </div>
-        <div class="field">
-          <span class="field-label">{{ i18n.t('llm_model') }}</span>
-          <input v-model="llmModel" class="input wide" placeholder="deepseek-v4-flash" />
-        </div>
-        <p class="hint-text">{{ i18n.t('llm_skip_hint') }}</p>
-
-        <div class="row-actions">
-          <button class="btn btn-ghost" type="button" @click="goStep(1)">
-            {{ i18n.t('back') }}
-          </button>
-          <span class="spacer"></span>
-          <button class="btn btn-ghost" type="button" data-testid="llm-skip" @click="skipLlm">
-            {{ i18n.t('skip') }}
-          </button>
-          <button
-            class="btn btn-primary"
-            type="button"
-            data-testid="llm-next"
-            @click="goStep(3)"
-          >
-            {{ i18n.t('next') }}
-          </button>
-        </div>
-      </section>
-
       <section v-else class="step-body">
         <div class="field">
           <span class="field-label">{{ i18n.t('settings_coding_lang') }}</span>
@@ -295,7 +216,7 @@ async function finish() {
         <p v-if="done" class="msg ok" data-testid="setup-done">{{ i18n.t('setup_done') }}</p>
 
         <div class="row-actions">
-          <button class="btn btn-ghost" type="button" :disabled="finishing || done" @click="goStep(2)">
+          <button class="btn btn-ghost" type="button" :disabled="finishing || done" @click="goStep(1)">
             {{ i18n.t('back') }}
           </button>
           <span class="spacer"></span>

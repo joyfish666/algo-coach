@@ -186,7 +186,8 @@ watch(
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  background: var(--bg-secondary);
+  background: var(--bg-primary);
+  border-right: 1px solid var(--border-subtle);
   padding: var(--space-6) var(--space-4);
 }
 
@@ -201,7 +202,7 @@ watch(
 }
 
 .brand-mark {
-  color: var(--accent);
+  color: var(--text-primary);
 }
 
 nav {
@@ -221,12 +222,12 @@ nav {
 }
 
 .nav-item:hover {
-  background: var(--bg-primary);
+  background: var(--bg-secondary);
 }
 
 .nav-item.router-link-active {
-  background: var(--bg-primary);
-  color: var(--accent);
+  background: var(--bg-secondary);
+  font-weight: 600;
 }
 
 .sidebar-footer {

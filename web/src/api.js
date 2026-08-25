@@ -89,6 +89,13 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     }),
+  testLlm: (body) =>
+    request('/api/llm/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      timeoutMs: 45000,
+    }),
   validateCookie: (cookie) =>
     request('/api/setup/validate-cookie', {
       method: 'POST',

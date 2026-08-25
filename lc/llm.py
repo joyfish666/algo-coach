@@ -38,12 +38,15 @@ class LLMClient:
         self.model = model or "deepseek-v4-flash"
         self.timeout = float(timeout)
 
-    def chat(self, messages: list) -> str:
+    def chat(self, messages: list, *, max_tokens: int | None = None) -> str:
         payload = {
             "model": self.model,
             "messages": list(messages),
             "stream": False,
         }
+        # connectivity probes pass a tiny cap so a ping stays cheap
+        if max_tokens is not None:
+            payload["max_tokens"] = max_tokens
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",

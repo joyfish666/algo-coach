@@ -7,26 +7,21 @@ defineProps({
 
 <template>
   <div class="card stat-card">
+    <div class="eyebrow">{{ label }}</div>
     <div class="stat-value">{{ value }}</div>
-    <div class="stat-label">{{ label }}</div>
   </div>
 </template>
 
 <style scoped>
 .stat-card {
-  padding: var(--space-6);
-  text-align: center;
+  padding: var(--space-7);
 }
 
 .stat-value {
   font-size: var(--font-size-page);
   font-weight: 700;
+  letter-spacing: -0.02em;
   line-height: 1.2;
-}
-
-.stat-label {
-  color: var(--gray-neutral);
-  font-size: var(--font-size-caption);
-  margin-top: var(--space-1);
+  margin-top: var(--space-2);
 }
 </style>

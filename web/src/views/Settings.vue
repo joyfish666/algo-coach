@@ -22,6 +22,15 @@ const saving = ref(false)
 const savedAt = ref('')
 const saveError = ref('')
 
+// AI/LLM 配置独立于 Cookie：在这里单独填写与保存
+const llmKey = ref('')
+const llmBaseUrl = ref('')
+const llmModel = ref('')
+const hasLlmKey = ref(false)
+const savingLlm = ref(false)
+const llmSavedAt = ref('')
+const llmError = ref('')
+
 const clearingData = ref(false)
 const clearMessage = ref('')
 const clearConfirmInput = ref('')
@@ -37,6 +46,9 @@ onMounted(async () => {
     const settings = await api.getSettings()
     codingLang.value = settings.default_language || 'cpp'
     cookieConfigured.value = Boolean(settings.configured)
+    llmBaseUrl.value = settings.llm_base_url || ''
+    llmModel.value = settings.llm_model || ''
+    hasLlmKey.value = Boolean(settings.llm_api_key_masked)
   } catch {
     cookieConfigured.value = null
   }
@@ -53,6 +65,58 @@ async function saveDefaultLanguage() {
     saveError.value = err.message || String(err)
   } finally {
     saving.value = false
+  }
+}
+
+// 留空 Key 表示不修改已保存的值；接口地址与模型按当前输入保存
+async function saveLlm() {
+  if (savingLlm.value) return
+  savingLlm.value = true
+  llmError.value = ''
+  try {
+    const payload = {
+      llm_base_url: llmBaseUrl.value.trim(),
+      llm_model: llmModel.value.trim(),
+    }
+    if (llmKey.value.trim()) payload.llm_api_key = llmKey.value.trim()
+    const updated = await api.putSettings(payload)
+    hasLlmKey.value = Boolean(updated.llm_api_key_masked)
+    llmBaseUrl.value = updated.llm_base_url || ''
+    llmModel.value = updated.llm_model || ''
+    llmKey.value = ''
+    llmSavedAt.value = i18n.formatDateTime(new Date())
+  } catch (err) {
+    llmError.value =
+      (err.payload && err.payload.error && err.payload.error.message) || err.message || String(err)
+  } finally {
+    savingLlm.value = false
+  }
+}
+
+// 连通性探测：用表单当前值（未填的回退到已保存配置），不必先保存
+const testingLlm = ref(false)
+const llmTestOk = ref('')
+const llmTestError = ref('')
+
+async function testLlm() {
+  if (testingLlm.value) return
+  testingLlm.value = true
+  llmTestOk.value = ''
+  llmTestError.value = ''
+  const payload = {}
+  if (llmKey.value.trim()) payload.llm_api_key = llmKey.value.trim()
+  if (llmBaseUrl.value.trim()) payload.llm_base_url = llmBaseUrl.value.trim()
+  if (llmModel.value.trim()) payload.llm_model = llmModel.value.trim()
+  const startedAt = performance.now()
+  try {
+    const result = await api.testLlm(payload)
+    const elapsed = Math.round(performance.now() - startedAt)
+    llmTestOk.value = i18n.t('llm_test_ok', { model: result.model, ms: elapsed })
+  } catch (err) {
+    llmTestError.value =
+      (err.payload && err.payload.error && err.payload.error.message) || err.message || String(err)
+  } finally {
+    testingLlm.value = false
   }
 }
 
@@ -130,6 +194,65 @@ async function eraseAllData() {
     </div>
 
     <div class="card">
+      <h2>{{ i18n.t('settings_llm') }}</h2>
+      <div class="row">
+        <span v-if="cookieConfigured !== null" class="chip" :class="{ 'chip-ok': hasLlmKey }" data-testid="llm-chip">
+          {{ hasLlmKey ? i18n.t('llm_enabled') : i18n.t('llm_disabled') }}
+        </span>
+        <span class="hint-text">{{ i18n.t('llm_hint') }}</span>
+      </div>
+      <div class="field">
+        <span class="field-label">{{ i18n.t('llm_api_key') }}</span>
+        <input
+          v-model="llmKey"
+          class="input llm-input"
+          type="password"
+          autocomplete="off"
+          data-testid="llm-key-input"
+        />
+        <span v-if="hasLlmKey" class="hint-text">{{ i18n.t('llm_key_saved_hint') }}</span>
+      </div>
+      <div class="field">
+        <span class="field-label">{{ i18n.t('llm_base_url') }}</span>
+        <input
+          v-model="llmBaseUrl"
+          class="input llm-input"
+          placeholder="https://api.deepseek.com"
+          data-testid="llm-url-input"
+        />
+      </div>
+      <div class="field">
+        <span class="field-label">{{ i18n.t('llm_model') }}</span>
+        <input
+          v-model="llmModel"
+          class="input llm-input"
+          placeholder="deepseek-v4-flash"
+          data-testid="llm-model-input"
+        />
+      </div>
+      <div class="row">
+        <button class="btn btn-primary" type="button" :disabled="savingLlm" data-testid="llm-save" @click="saveLlm">
+          {{ i18n.t('save') }}
+        </button>
+        <button
+          class="btn btn-ghost"
+          type="button"
+          :disabled="testingLlm"
+          data-testid="llm-test"
+          @click="testLlm"
+        >
+          {{ testingLlm ? i18n.t('llm_testing') : i18n.t('llm_test') }}
+        </button>
+        <span v-if="llmSavedAt && !llmError" class="saved-hint" data-testid="llm-saved-hint">
+          {{ i18n.t('saved_ok') }} · {{ llmSavedAt }}
+        </span>
+        <span v-if="llmError" class="error-hint" data-testid="llm-error">{{ llmError }}</span>
+      </div>
+      <p v-if="llmTestOk" class="test-msg ok" data-testid="llm-test-ok">{{ llmTestOk }}</p>
+      <p v-else-if="llmTestError" class="test-msg bad" data-testid="llm-test-error">{{ llmTestError }}</p>
+    </div>
+
+    <div class="card">
       <h2>{{ i18n.t('settings_account') }}</h2>
       <div class="row">
         <span
@@ -189,6 +312,31 @@ async function eraseAllData() {
 .field-label {
   margin-bottom: 0;
   min-width: 120px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin-bottom: var(--space-4);
+}
+
+.llm-input {
+  max-width: 420px;
+}
+
+.test-msg {
+  font-size: var(--font-size-caption);
+  margin: var(--space-2) 0 0;
+}
+
+.test-msg.ok {
+  color: var(--ok);
+}
+
+.test-msg.bad {
+  color: var(--danger);
+  word-break: break-all;
 }
 
 .saved-hint {

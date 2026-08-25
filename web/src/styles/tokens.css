@@ -16,10 +16,10 @@
   --danger: #dc2626;
   --danger-soft: rgba(220, 38, 38, 0.12);
 
-  --border-subtle: rgba(176, 176, 176, 0.45);
-  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --border-subtle: #ececec;
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.03);
 
-  --radius-card: 10px;
+  --radius-card: 14px;
   --radius-pill: 999px;
 
   --space-1: 4px;
@@ -27,6 +27,7 @@
   --space-3: 12px;
   --space-4: 16px;
   --space-6: 24px;
+  --space-7: 28px;
   --space-8: 32px;
 
   --font-size-caption: 12px;
@@ -115,6 +116,7 @@ button {
 .page-header h1 {
   font-size: var(--font-size-page);
   font-weight: 700;
+  letter-spacing: -0.02em;
   line-height: 1.25;
   margin: 0 0 var(--space-1);
 }
@@ -130,7 +132,7 @@ button {
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-card);
   box-shadow: var(--shadow-card);
-  padding: var(--space-6);
+  padding: var(--space-7);
 }
 
 .card + .card {
@@ -152,7 +154,7 @@ button {
   align-items: center;
   justify-content: center;
   gap: var(--space-2);
-  border-radius: var(--radius-pill);
+  border-radius: 10px;
   border: 1px solid transparent;
   padding: var(--space-2) var(--space-6);
   font-size: var(--font-size-body);
@@ -160,7 +162,8 @@ button {
   transition:
     background-color 0.15s ease,
     color 0.15s ease,
-    border-color 0.15s ease;
+    border-color 0.15s ease,
+    opacity 0.15s ease;
 }
 
 .btn:disabled {
@@ -168,13 +171,15 @@ button {
   cursor: not-allowed;
 }
 
+/* monochrome primary: near-black in light theme, near-white in dark, so the
+   accent blue stays reserved for links and highlights */
 .btn-primary {
-  background: var(--accent);
-  color: #ffffff;
+  background: var(--text-primary);
+  color: var(--bg-primary);
 }
 
 .btn-primary:hover:not(:disabled) {
-  filter: brightness(1.08);
+  opacity: 0.85;
 }
 
 .btn-ghost {
@@ -270,6 +275,16 @@ button {
   font-size: var(--font-size-caption);
   color: var(--gray-neutral);
   margin-bottom: var(--space-2);
+}
+
+/* small uppercase section label ("OVERVIEW", "TOTAL BALANCE"), the eyebrow
+   pattern from the minimalist style guide */
+.eyebrow {
+  color: var(--gray-neutral);
+  font-size: var(--font-size-caption);
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .empty-state {

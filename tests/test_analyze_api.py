@@ -119,6 +119,19 @@ def test_analyze_stats_without_llm(client):
     assert "lrn" in recs
 
 
+def test_analyze_reports_ai_configured_without_generating(client):
+    # regression: ai_configured used to be computed only inside the
+    # use_llm branch, so the initial load (use_llm=false) always claimed
+    # the LLM was unconfigured and the report button never appeared
+    seed_cache()
+    seed_config_llm(None)
+    response = client.post("/api/analyze", json={"use_llm": False}, headers=ORIGIN)
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ai_report"] is None
+    assert body["ai_configured"] is True
+
+
 def test_ask_requires_llm_configured(client):
     response = client.post(
         "/api/ask",

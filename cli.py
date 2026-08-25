@@ -224,7 +224,6 @@ def main(argv=None):
         host=host,
         port=port,
         log_level="debug" if args.debug else "info",
-        sock=sock,
     )
     server = uvicorn.Server(config)
 
@@ -237,7 +236,9 @@ def main(argv=None):
 
     print_banner(url)
     try:
-        server.run()
+        # hand over the pre-bound listener so no other process can claim the
+        # chosen port between discovery and startup
+        server.run(sockets=[sock])
     finally:
         release_instance_lock()
     return 0
