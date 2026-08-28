@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { onBeforeRouteLeave } from 'vue-router'
 import MarkdownIt from 'markdown-it'
 
@@ -50,6 +50,14 @@ let notesTimer = null
 
 const favorite = ref(false)
 
+// difficulty enums render localized like everywhere else (the workbench
+// header used to show a raw "medium" in the zh UI); unknown values fall
+// back to the raw enum instead of an empty chip
+function difficultyLabel(value) {
+  const level = (value || '').toLowerCase()
+  return ['easy', 'medium', 'hard'].includes(level) ? i18n.t(`diff_${level}`) : value
+}
+
 function errorMessageFor(err) {
   const keyFromServer = err && err.payload && err.payload.error && err.payload.error.message_key
   if (keyFromServer) {
@@ -99,6 +107,19 @@ const restoreCandidate = ref(null)
 const showRestoreBar = ref(false)
 
 let autosaveTimer = null
+let snapshotTimer = null
+// Watchers flush asynchronously, so programmatic assignments (loading a
+// problem, applying a fetched template, reverting a failed language switch)
+// must be fenced until after the next tick. Without this fence the lang
+// watcher treated the loaded problem as a user-initiated switch and PUT the
+// just-loaded code under the PREVIOUS language - silently overwriting the
+// saved solution of an unrelated problem on every navigation.
+let hydrating = false
+
+async function setHydratingUntilFlushed() {
+  await nextTick()
+  hydrating = false
+}
 
 const leftPaneRef = ref(null)
 const rightColRef = ref(null)
@@ -198,6 +219,7 @@ async function loadProblem() {
   loading.value = true
   loadError.value = ''
   verdict.value = null
+  hydrating = true
   try {
     const data = await api.getProblem(props.qid)
     if (props.qid !== qidAtStart) return // a newer navigation superseded us
@@ -225,7 +247,11 @@ async function loadProblem() {
     if (props.qid !== qidAtStart) return
     applyLoadError(err)
   } finally {
-    if (props.qid === qidAtStart) loading.value = false
+    if (props.qid === qidAtStart) {
+      loading.value = false
+      // hold the fence until queued watcher callbacks have flushed
+      await setHydratingUntilFlushed()
+    }
   }
 }
 
@@ -245,23 +271,42 @@ function scheduleAutosave() {
   autosaveTimer = setTimeout(flushSave, 1200)
 }
 
-async function flushSave() {
+async function flushSave(qid = props.qid) {
   clearTimeout(autosaveTimer)
   autosaveTimer = null
   try {
-    await api.putSolution(props.qid, lang.value, code.value)
+    await api.putSolution(qid, lang.value, code.value)
   } catch {
     /* offline or transient; snapshot keeps the draft */
   }
 }
 
-watch(code, (value) => {
-  saveSnapshot(props.qid, lang.value, value)
+// localStorage writes on every keystroke serialized the full snapshot and
+// rewrote the index twice per keypress - perceptible on long solutions, so
+// the write is debounced like the network save (flushes below cover leave,
+// unload and problem switches)
+function scheduleSnapshot() {
+  clearTimeout(snapshotTimer)
+  snapshotTimer = setTimeout(() => {
+    snapshotTimer = null
+    saveSnapshot(props.qid, lang.value, code.value)
+  }, 300)
+}
+
+function writeSnapshotNow() {
+  clearTimeout(snapshotTimer)
+  snapshotTimer = null
+  saveSnapshot(props.qid, lang.value, code.value)
+}
+
+watch(code, () => {
+  if (hydrating) return
+  scheduleSnapshot()
   scheduleAutosave()
 })
 
 watch(lang, async (_next, prev) => {
-  if (!problem.value || switchingLang.value) return
+  if (!problem.value || switchingLang.value || hydrating) return
   switchingLang.value = true
   clearTimeout(autosaveTimer)
   try {
@@ -270,14 +315,21 @@ watch(lang, async (_next, prev) => {
   }
   try {
     const result = await api.getTemplate(props.qid, _next)
+    hydrating = true
     lang.value = _next
     code.value = result.code || ''
     if (!problem.value.languages_available.includes(_next)) {
       problem.value.languages_available.push(_next)
     }
+    await setHydratingUntilFlushed()
   } catch (err) {
     notifyActionError(err)
+    // reverting the select is programmatic: without the fence the watcher
+    // re-entered and PUT the current (previous-language) code under the
+    // language whose template fetch had just failed
+    hydrating = true
     lang.value = prev
+    await setHydratingUntilFlushed()
   } finally {
     switchingLang.value = false
   }
@@ -312,11 +364,11 @@ function scheduleNotesSave() {
   notesTimer = setTimeout(flushNotesSave, 1200)
 }
 
-async function flushNotesSave() {
+async function flushNotesSave(qid = props.qid) {
   clearTimeout(notesTimer)
   notesTimer = null
   try {
-    await api.putNotes(props.qid, notesDraft.value)
+    await api.putNotes(qid, notesDraft.value)
     notesSavedAt.value = new Date().toLocaleTimeString()
   } catch {
     /* transient; the user can retry by editing again */
@@ -371,6 +423,11 @@ async function submitCode() {
       lang: lang.value,
       code: code.value,
     })
+    // the submit succeeded server-side but its local archive write failed:
+    // without this hint the submission silently never appears in /history
+    if (verdict.value && verdict.value.archived === false) {
+      toast.error({ text: i18n.t('archive_failed') })
+    }
   } catch (err) {
     notifyActionError(err)
   } finally {
@@ -393,11 +450,16 @@ onBeforeRouteLeave(() => {
   if (autosaveTimer) {
     flushSave()
   }
-  saveSnapshot(props.qid, lang.value, code.value)
+  writeSnapshotNow()
+  // the code buffer had a flush path here; the notes debounce was only ever
+  // cancelled, silently dropping the last keystrokes on every navigation
+  if (notesTimer) {
+    flushNotesSave()
+  }
 })
 
 function onBeforeUnload() {
-  saveSnapshot(props.qid, lang.value, code.value)
+  writeSnapshotNow()
 }
 
 onMounted(() => {
@@ -413,12 +475,20 @@ watch(
   () => props.qid,
   (next, prev) => {
     if (!next || !prev || next === prev) return
-    // pending debounced saves must not land under the new qid
+    // pending debounced saves must land under the OLD qid: refs still hold
+    // the previous problem's content at this point, so flushing with the
+    // explicit qid keeps the last keystrokes instead of losing them (a bare
+    // cancel used to drop them; letting props.qid be used would corrupt the
+    // next problem's files - both halves of the fix are needed together)
+    if (autosaveTimer) flushSave(prev)
     clearTimeout(autosaveTimer)
     autosaveTimer = null
+    clearTimeout(snapshotTimer)
+    snapshotTimer = null
+    saveSnapshot(prev, lang.value, code.value)
+    if (notesTimer) flushNotesSave(prev)
     clearTimeout(notesTimer)
     notesTimer = null
-    saveSnapshot(prev, lang.value, code.value)
     verdict.value = null
     loadError.value = ''
     showRestoreBar.value = false
@@ -434,6 +504,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('beforeunload', onBeforeUnload)
   window.removeEventListener('keydown', onKeydown)
   clearTimeout(autosaveTimer)
+  clearTimeout(snapshotTimer)
   clearTimeout(notesTimer)
   stopJudgingIndicator()
 })
@@ -486,7 +557,7 @@ onBeforeUnmount(() => {
               :class="['easy', 'medium', 'hard'].includes(problem.difficulty) ? `chip-${problem.difficulty}` : ''"
               :to="{ path: '/problems', query: { difficulty: problem.difficulty } }"
             >
-              {{ problem.difficulty }}
+              {{ difficultyLabel(problem.difficulty) }}
             </RouterLink>
             <span v-if="problem.paid_only" class="chip">★</span>
             <RouterLink

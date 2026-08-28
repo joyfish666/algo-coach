@@ -1,6 +1,8 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { useStatusStore } from './stores/status'
+
 const apiMocks = {
   getStatus: vi.fn().mockResolvedValue({
     configured: true,
@@ -69,8 +71,28 @@ describe('router smoke', () => {
   })
 
   it('forces /setup when no cookie is configured yet', async () => {
+    // status is fetched fresh (stale store), as it would be right after
+    // startup or a data-directory swap
+    useStatusStore().$reset()
     apiMocks.getStatus.mockResolvedValue({ configured: false, sync: {} })
     await router.push('/settings')
     expect(router.currentRoute.value.path).toBe('/setup')
+  })
+
+  it('navigates on cached status inside the freshness window and revalidates in the background', async () => {
+    useStatusStore().$reset()
+    apiMocks.getStatus.mockResolvedValue({ configured: true, sync: {} })
+    await router.push('/problems')
+    const callsAfterWarmup = apiMocks.getStatus.mock.calls.length
+
+    // backend flips to unconfigured, but the cached snapshot is fresh:
+    // navigation must proceed instead of blocking on a round-trip (the real
+    // redirect still happens via the setup flow refreshing its own status)
+    apiMocks.getStatus.mockResolvedValue({ configured: false, sync: {} })
+    await router.push('/daily')
+    expect(router.currentRoute.value.path).toBe('/daily')
+    // ...while one background refresh revalidated
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(apiMocks.getStatus.mock.calls.length).toBeGreaterThan(callsAfterWarmup)
   })
 })

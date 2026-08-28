@@ -82,6 +82,44 @@ describe('workbench layout', () => {
     wrapper.unmount()
   })
 
+  it('loading a problem never re-fires the language-switch flow', async () => {
+    // Regression: watchers flush asynchronously, so loadProblem's problem/lang
+    // assignments raced the lang watcher's `!problem.value` guard - the mount
+    // looked like a user language switch and PUT the just-loaded python3 code
+    // under the previous language (silently corrupting an unrelated file),
+    // then replaced the editor content with a fresh template.
+    apiMocks.getProblem.mockResolvedValue({
+      ...JSON.parse(JSON.stringify(FIXTURE)),
+      language: 'python3',
+      languages_available: ['python3'],
+      code: '# saved python work\n',
+    })
+    apiMocks.putSolution.mockClear()
+
+    const wrapper = mount(ProblemDetail, {
+      props: { qid: 'two-sum' },
+      global: {
+        plugins: [createPinia()],
+        stubs: {
+          CodeEditor: { template: '<div class="stub-editor"/>' },
+          AiChatSidebar: { template: '<div class="stub-ai"/>' },
+          RouterLink: { template: '<a><slot/></a>' },
+          Teleport: { template: '<div><slot/></div>' },
+        },
+      },
+      attachTo: document.body,
+    })
+    await flushPromises()
+    // one full macrotask later the queued watcher callbacks have flushed too
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    await flushPromises()
+
+    expect(apiMocks.putSolution).not.toHaveBeenCalled()
+    const select = wrapper.find('[data-testid="editor-lang-select"]')
+    expect(select.element.value).toBe('python3')
+    wrapper.unmount()
+  })
+
   it('left pane width follows persisted ratio', async () => {
     const wrapper = await mountWorkbench({ mainPct: 30, editorPct: 60 })
     const left = wrapper.find('.left-pane')

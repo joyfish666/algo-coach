@@ -55,6 +55,17 @@ const i18nSource = readFileSync(join(srcDir, 'stores', 'i18n.js'), 'utf8')
 const zhKeys = extractCatalogKeys(i18nSource, 'zh')
 const enKeys = extractCatalogKeys(i18nSource, 'en')
 
+// The block regex depends on the catalog's exact closing shape; a refactor
+// could silently extract zero keys, pass the parity loop vacuously, and
+// report every t() usage as missing instead of admitting the parse failed.
+if (zhKeys.size === 0 || enKeys.size === 0) {
+  console.error(
+    `catalog extraction found 0 keys (zh=${zhKeys.size}, en=${enKeys.size}) - ` +
+      'the catalog shape no longer matches the extraction regex; fix the regex'
+  )
+  process.exit(1)
+}
+
 let failed = false
 
 for (const key of zhKeys) {

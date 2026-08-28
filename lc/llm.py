@@ -111,4 +111,15 @@ class LLMClient:
         except (KeyError, IndexError, TypeError) as exc:
             logger.warning("llm unexpected completion shape keys=%s", sorted(body) if isinstance(body, dict) else type(body))
             raise NetworkError("LLM: unexpected completion shape") from exc
+        if content is None or not str(content).strip():
+            # reasoning-style endpoints legitimately answer with content:null
+            # (all tokens went to reasoning_content, or max_tokens was spent
+            # before any visible text) - str(None) used to surface the literal
+            # string "None" as the coach's answer with a 200 status
+            fallback = body["choices"][0]["message"].get("reasoning_content")
+            if isinstance(fallback, str) and fallback.strip():
+                logger.warning("llm empty content, falling back to reasoning_content")
+                return fallback.strip()
+            logger.warning("llm empty completion content keys=%s", sorted(body) if isinstance(body, dict) else type(body))
+            raise NetworkError("LLM: empty completion (content is null)")
         return str(content).strip()

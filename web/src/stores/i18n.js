@@ -206,6 +206,26 @@ export const MESSAGES = {
     sync_interrupted: '后端已重启，同步被中断，请重新点击同步',
     judge_missing_question_id: '该题缺少站点内部题号，无法判定；请重新打开题目后重试',
     chart_row_tip: '{name}：掌握 {pct}%，做过 {count} 题',
+    // ---- backend message_keys (lc/i18n.py): the server sends these on
+    // domain errors so wording follows the UI language, not the backend
+    // process locale. tests/test_i18n.py fails when a backend key is missing
+    // from either block here - keep the two lists in lockstep.
+    rate_limited: '请求过于频繁已触发限速，请稍后再试',
+    network_error: '网络错误，请检查网络后重试',
+    problem_not_found: '未找到该题目',
+    template_missing_hint: '打开题目并选择该语言',
+    judge_timeout_unknown: '判定超时，结果未知，请在站内确认',
+    run_timeout: '运行判定超时，请稍后重试；若持续失败请把调试日志发给开发者',
+    sync_in_progress: '题库同步正在进行中',
+    not_configured: '尚未完成配置',
+    ask_not_configured: 'LLM 未配置，请先在设置中填写 API Key 与接口地址',
+    action_retry: '重试',
+    // ---- batch-6 additions
+    network_unreachable: '无法连接本地服务：请确认 coach 进程仍在运行',
+    history_no_match: '没有符合该筛选条件的提交记录',
+    ai_not_configured_hint: '尚未配置 LLM：在「设置 → AI（LLM）」填写 API Key 与接口地址后即可对话',
+    analyze_ai_regenerate: '重新生成',
+    archive_failed: '判定成功，但本地归档写入失败，这条提交不会出现在提交历史中',
     debug_title: '调试模式',
     debug_hint: '收集前端报错日志，点「复制日志」发给开发者即可定位问题',
     debug_copy: '复制日志',
@@ -424,6 +444,26 @@ export const MESSAGES = {
     judge_missing_question_id:
       'This problem is missing its internal question id; reopen it and retry',
     chart_row_tip: '{name}: {pct}% mastery, attempted {count} problems',
+    // ---- backend message_keys (lc/i18n.py): see the zh block note above;
+    // keep both locale lists in lockstep with the backend catalog.
+    rate_limited: 'Rate limited, please try again later',
+    network_error: 'Network error, please check your connection and retry',
+    problem_not_found: 'Problem not found',
+    template_missing_hint: 'Open the problem and select this language to fetch its template',
+    judge_timeout_unknown: 'Judging timed out with unknown result, please verify on the website',
+    run_timeout: 'Run judging timed out - please retry; if it keeps failing share the debug log',
+    sync_in_progress: 'Problem list sync already in progress',
+    not_configured: 'Setup not completed yet',
+    ask_not_configured: 'LLM is not configured yet - set your API key and base URL in settings first',
+    action_retry: 'Retry',
+    // ---- batch-6 additions
+    network_unreachable: 'Cannot reach the local server: make sure the coach process is running',
+    history_no_match: 'No submissions match this filter',
+    ai_not_configured_hint:
+      'LLM is not configured yet — set an API key and base URL under Settings → AI (LLM) to chat',
+    analyze_ai_regenerate: 'Regenerate',
+    archive_failed:
+      'Verdict succeeded, but local archiving failed - this submission will not appear in history',
     debug_title: 'Debug mode',
     debug_hint: 'Collects frontend errors into a log you can copy and share',
     debug_copy: 'Copy logs',

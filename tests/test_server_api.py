@@ -425,6 +425,8 @@ def test_unknown_problem_returns_404(client, monkeypatch):
 
 def test_spa_fallback_never_serves_sibling_of_dist(tmp_path, monkeypatch):
     """Regression: 'dist-old/x' passed the old startswith('...dist') check."""
+    from fastapi import HTTPException
+
     dist = tmp_path / "dist"
     dist.mkdir()
     (dist / "index.html").write_text("<html>spa</html>", encoding="utf-8")
@@ -433,12 +435,24 @@ def test_spa_fallback_never_serves_sibling_of_dist(tmp_path, monkeypatch):
     sibling_file.write_text("secret", encoding="utf-8")
     monkeypatch.setattr(api_module, "DIST_DIR", dist)
 
-    escaped = api_module.spa_fallback("../dist-old/secret.txt")
-    assert str(sibling_file) not in str(getattr(escaped, "path", ""))
-    assert str(dist / "index.html") == str(getattr(escaped, "path", ""))
+    # asset-shaped paths (and traversal payloads) must 404 instead of being
+    # rewritten to index.html: a missing hashed chunk answered with HTML used
+    # to surface as an opaque MIME error and silently kill every navigation
+    # from a stale tab
+    with pytest.raises(HTTPException) as excinfo:
+        api_module.spa_fallback("../dist-old/secret.txt")
+    assert excinfo.value.status_code == 404
+    assert str(sibling_file) not in str(excinfo.value)
+
+    with pytest.raises(HTTPException) as stale_info:
+        api_module.spa_fallback("assets/ProblemDetail-deadbeef.js")
+    assert stale_info.value.status_code == 404
 
     normal = api_module.spa_fallback("index.html")
     assert str(dist / "index.html") == str(getattr(normal, "path", ""))
+
+    root = api_module.spa_fallback("")
+    assert str(dist / "index.html") == str(getattr(root, "path", ""))
 
 
 # ---------------------------------------------------------------------------

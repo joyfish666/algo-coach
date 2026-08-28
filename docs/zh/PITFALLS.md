@@ -55,6 +55,21 @@
 
 - 优先读取 `Retry-After`：**兼容整数秒与 HTTP-date 两种格式**，两种都要解析。
 - 无头时指数退避 1s → 2s → 4s 封顶 30s。
+- **Retry-After 的重试等待同样封顶 30s**（2026-08-28 已修复）：恶意/故障的
+  `Retry-After: 86400` 曾被原样照睡——同步工作线程会停摆一天且无法取消。
+  抛出的 `RateLimitError` 仍携带未封顶原值，供 API 层生成 Retry-After 响应头。
+- **LLM 的 `content: null` 不是答案 "None"**（2026-08-28 已修复）：推理型端点会在
+  `reasoning_content` 里出全文、`content` 置 null；思考模型撞上 max_tokens 限幅时
+  同样如此。`str(None)` 曾把字面量 "None" 当 200 回答返回。视为空回答报错，
+  `reasoning_content` 非空时先回退（否则 max_tokens 限幅的连接测试对思考模型必失败）。
+
+## 实例锁（单实例守卫）
+
+- **O_EXCL 创建与写入 payload 之间存在零字节窗口**（2026-08-28 已修复）：第二个并发
+  启动会读到空文件 →「陈旧锁」→ 删掉赢家的锁 → 双实例并存。读不到内容 ≠ 死进程：
+  空文件给短宽限期反复重读，宽限期后仍为空才接管。
+- **释放锁必须核对归属**：无条件 unlink 会在「崩溃接管」场景删掉*继任者*的锁，
+  重新打开双实例窗口。只有 payload 记录的 pid 是自己才删除。
 
 ## 前端与服务
 
@@ -116,6 +131,19 @@
   否则残留累加器会伪装成「可续传」快照指向已删除的数据。
 - **auth 锁序全局固定为 `_persist_lock` → `_state_lock`**：configure/reset 与轮换持久化都按此序获取；
   反序获取会在 configure 换血与迟到响应持久化之间形成死锁窗口。
+- **config.toml 的互斥必须长在文件旁边，而不是某一个调用方里**（2026-08-28 已修复）：
+  整文件写者有三处（settings API 保存、轮换持久化、清除数据），各自局部锁只保护自己的
+  RMW 窗口——设置保存会被并发轮换持久化的旧快照整体回滚。互斥收敛为
+  `lc.config.update_lock()`，整段「load→改→save」必须持锁；持久化的 still-current 复核
+  **必须放进临界区内部**（否则「清除数据后未过复核的在途持久化」会把已擦除的 Cookie
+  复活进新建的 config.toml）；清除数据先 `auth.reset_state()` 再删文件。
+  锁序全局规则：`_lifecycle_lock` / `_persist_lock` → config 锁；**持 config 锁时
+  禁止再取 `_persist_lock`**（update_settings 先释放 config 锁再 rebuild，否则成环）。
+- **Windows 上 `os.replace` 会因并发读者抛 PermissionError**（2026-08-28 已修复）：
+  CPython 打开文件不带 FILE_SHARE_DELETE，读者握着句柄期间替换目标文件 = sharing
+  violation。「原子替换使裸读安全」只在 POSIX 成立——manifest 上虽是 OS Independent，
+  GET /api/problems 与收藏写入并发时曾随机 500。全部写盘收敛到 `lc/atomicio.py`：
+  tmp + 有界重试（读者持锁只有微秒级，短重试即可吸收），禁止再手写 tmp+replace。
 - **只有当前 client 可以持久化轮换 Cookie**（2026-08-25 已修复）：rebuild 后旧 client 的在途响应
   若仍触发 `_persist_rotated_cookies`，会把旧 jar 写盘覆盖新凭据。持久化前必须核对
   `_http_client is client`。
@@ -147,6 +175,20 @@
   这类裸键且无报错。新增服务端 `message_key` 或界面文案时，必须确认 zh/en 两份 catalog 都有
   对应条目（auth 横幅曾因此长期显示裸键）。同一领域概念（如判定文案）禁止两处各自实现映射——
   History 曾绕过 verdict_* 目录显示原始英文枚举；已收敛到共享 `utils/verdict.js`。
+- **后端 message_key ↔ 前端 catalog 的平价必须有自动化护栏**（2026-08-28 已修复）：
+  `check:i18n` 只能扫描字面 `t('...')`，服务端驱动用法（`i18n.t(keyFromServer)`）全部
+  不可见——后端 15 个 message_key 曾缺 11 个仍全绿，非 zh locale 的后端进程会把英文
+  错误文本直接渲染进中文界面。`tests/test_i18n.py` 的平价测试保证后端 catalog ⊆ 前端
+  两个 locale 块；`check:i18n` 对「提取到 0 键」fail-loud（目录形状重构后正则失效会
+  静默全绿）。另外 `HTTPException(detail=t(key))` 曾整体绕过 message_key 机制——
+  带 i18n 键的 HTTPException 一律走 `http_domain_error()`，前端识别 `detail.message_key`。
+- **Vue watcher 异步 flush 会让「先赋值后改」的守卫失效**（2026-08-28 已修复，最高危）：
+  watcher 回调执行时读到的是整段同步代码跑完后的状态。工作台 `loadProblem` 先赋
+  `problem.value` 再改 `lang.value`，`!problem.value` 守卫在回调时点已失效——挂载/切题
+  被当成「用户切换语言」，把刚加载的代码用旧语言 PUT 覆盖无关题目的文件，再用模板覆写
+  编辑器。程序化赋值（加载/模板应用/切换失败回退）必须用**跨 nextTick 的栅栏标志**抑制
+  watcher，`finally` 里 `await nextTick()` 后才能解除。测试要跨一个 macrotask 断言
+  「未发生 PUT」，只 flushPromises 抓不到异步 flush 的 watcher。
 - **错误文案语言以 UI 语言为准**：服务端错误 payload 只保证 `message_key` 稳定，`message`
   文本跟随后端进程 locale；前端必须在 api 层集中按 message_key 翻译后再展示，
   各视图自行取 `error.message` 会导致中英混杂。
@@ -177,6 +219,12 @@
   设计 token 的 CSS 变量即可自动随 `data-theme` 切换。
 - **AbortSignal.timeout 需降级路径**：前端 fetch 统一加截止时间防「后端挂起永不返回」，
   但旧浏览器无该 API——封装处检测其存在性，缺失时退化为无超时而不是整个请求报错。
+- **SPA 回退必须区分「深链路径」与「资源路径」**（2026-08-28 已修复）：重新部署后旧标签页
+  引用的哈希 chunk 已不存在，catch-all 把 `/assets/xxx.js` 回写成 index.html——JS 请求收到
+  HTML，路由动态 import 失败且被吞掉，所有导航点击静默失效。资源形态（末段含扩展名）
+  未命中一律 404；router.onError 检测 chunk 失败后整页刷新重新接管。
+- **fetch 的网络层失败要归一化**：除超时（DOMException TimeoutError）外，拒连/断网抛的是
+  `TypeError: Failed to fetch`——不翻译就会把英文浏览器原文渲染进中文界面。
 - **双 coach 实例并存**：由单实例守卫杜绝（绑定失败探测拒启 + instance.lock 锁文件封堵
   「端口顺延后新实例直接绑成功」盲区）；锁仅用于实例互斥而非数据文件加锁。若守卫被绕过仍按
   jsonl 单次小写入（O_APPEND 级别）接受 last-wins；同理，「清除数据瞬间恰有判题在途」时

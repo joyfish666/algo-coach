@@ -54,12 +54,28 @@ const routes = [
 const router = createRouter({
   history: createWebHistory(),
   routes,
+  scrollBehavior(to, from, savedPosition) {
+    // without this the window scroll carried across navigations: scrolling
+    // deep into the problem list, then opening Settings, landed mid-page
+    return savedPosition || { top: 0 }
+  },
 })
+
+// /api/status decides the /setup redirect, but "configured" only changes via
+// setup/erase - awaiting a fresh round-trip on every navigation used to block
+// each click (up to the 45s fetch deadline) behind a backend that had stopped
+// answering. Fresh-enough cached state lets navigation proceed immediately
+// while one background refresh revalidates.
+const STATUS_MAX_AGE_MS = 30000
 
 router.beforeEach(async (to) => {
   if (to.path === '/setup') return true
   const status = useStatusStore()
-  await status.refresh()
+  if (status.loaded && Date.now() - status.refreshedAt < STATUS_MAX_AGE_MS) {
+    status.refresh()
+  } else {
+    await status.refresh()
+  }
   if (status.loaded && status.reachable && !status.configured) {
     return { path: '/setup' }
   }
@@ -70,6 +86,17 @@ router.afterEach((to) => {
   const i18n = useI18nStore()
   const key = to.meta?.titleKey
   document.title = key ? `${i18n.t(key)} · AlgoCoach` : 'AlgoCoach'
+})
+
+// Lazy-loaded chunks are content-hashed, so a tab left open across a
+// redeploy references chunk names that no longer exist: the dynamic import
+// rejected and the failed navigation was swallowed - every click silently
+// did nothing until a manual reload. A hard navigation re-fetches index.html
+// with the new chunk graph.
+router.onError((error, to) => {
+  if (/dynamically imported module|module script|Importing a module script/i.test(error?.message || '')) {
+    window.location.assign(to?.fullPath || '/')
+  }
 })
 
 export default router

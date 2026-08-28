@@ -23,7 +23,11 @@ def test_pid_alive_rejects_invalid_and_dead():
     assert cli._pid_alive(0) is False
     assert cli._pid_alive(-5) is False
     assert cli._pid_alive("x") is False
+    # the property being checked: the return value is a real boolean, so an
+    # unreasonably large (almost surely unallocated) pid cannot smuggle
+    # arbitrary truthy values through the guard
     assert cli._pid_alive(2**30) in (True, False)
+    assert isinstance(cli._pid_alive(2**30), bool)
 
 
 def test_acquire_lock_then_refuse_second(tmp_path, monkeypatch):
@@ -82,6 +86,27 @@ def test_release_removes_lock(monkeypatch, tmp_path):
     assert owned
     cli.release_instance_lock()
     assert not cli.lock_path().exists()
+
+
+def test_release_keeps_foreign_lock(monkeypatch, tmp_path):
+    """Regression: release unlinked unconditionally, so an instance exiting
+    after a crash-and-takeover deleted its SUCCESSOR's lock and reopened the
+    double-instance window."""
+    import json as json_module
+
+    lock = tmp_path / "instance.lock"
+    monkeypatch.setattr(cli, "lock_path", lambda: lock)
+    lock.write_text(
+        json_module.dumps({"pid": 424242, "port": 8000}), encoding="utf-8"
+    )
+    cli.release_instance_lock()
+    assert lock.exists()
+
+    lock.write_text(
+        json_module.dumps({"pid": os.getpid(), "port": 8000}), encoding="utf-8"
+    )
+    cli.release_instance_lock()
+    assert not lock.exists()
 
 
 def test_probe_is_coach_false_when_nothing_listens():

@@ -14,10 +14,10 @@ def isolated_env(tmp_path, monkeypatch):
     home.mkdir()
     monkeypatch.setenv("ALGOCOACH_HOME", str(home))
     auth.reset_state()
-    api_module._archive = None
+    api_module.reset_app_state()
     yield
     auth.reset_state()
-    api_module._archive = None
+    api_module.reset_app_state()
 
 
 @pytest.fixture
@@ -68,7 +68,7 @@ def reset_fake_llm():
 def test_llm_test_requires_config(client):
     response = client.post("/api/llm/test", json={}, headers=ORIGIN)
     assert response.status_code == 400
-    assert response.json()["detail"].startswith("LLM")
+    assert response.json()["detail"]["message_key"] == "ask_not_configured"
 
 
 def test_llm_test_ok_with_saved_config(client, monkeypatch):

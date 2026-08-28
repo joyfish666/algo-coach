@@ -7,6 +7,88 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Sixth review pass: user/developer double-angle audit (2026-08-28)
+
+**Features**
+
+- The workbench resumes at the last-used language: `GET /api/problem/{qid}` now returns the
+  most recently written `solution.*` instead of the config default, so a python3 user
+  reopening a problem lands in their Python code instead of an empty C++ editor.
+- The AI coach sidebar gates on LLM availability (`GET /api/status` now exposes
+  `llm_configured`): without a key it shows a hint linking to Settings and disables send,
+  instead of failing with an error bubble per message.
+- Analytics: a "regenerate" action appears once a report is rendered - refreshing the report
+  after importing new submissions no longer requires a full page reload.
+
+**Bug fixes (root-caused)**
+
+- Workbench data loss on mount/problem-switch: Vue watchers flush asynchronously, so
+  `loadProblem`'s guard (`!problem.value`) was already stale by the time the language
+  watcher ran - loading looked like a user-initiated language switch and PUT the just-loaded
+  code under the previous language, silently overwriting an unrelated `solution.*`, then
+  replaced the editor content with a fresh template. The same fence also covers the
+  failed-template-fetch revert, which used to write the current code under the language whose
+  fetch had just failed. Programmatic assignments are now fenced across the next tick.
+- config.toml had three whole-file writers with caller-local locks only: a concurrent cookie
+  rotation persist could revert a settings save wholesale, and a persist that had passed its
+  still-current check could resurrect the erased cookie into a fresh config.toml after the
+  data wipe. The mutex moved into `lc.config.update_lock()` next to the file; the persist
+  re-checks currency inside the critical section; the wipe resets auth before deleting.
+- Windows `os.replace` raises PermissionError while any thread holds the target open (no
+  FILE_SHARE_DELETE), turning a routine persist into a random 500 whenever a reader was
+  mid-request. All persistence (config, favorites, problems cache, workspace files) now goes
+  through `lc/atomicio.py`, which retries the rename briefly to absorb reader collisions.
+- A successful submit followed by a failing archive append surfaced as a 500 and invited a
+  duplicate resubmission; the verdict is now returned with `archived: false` plus a frontend
+  toast, since the site-side submit cannot be replayed.
+- `Retry-After` was slept verbatim: a hostile header could park a sync worker for a day.
+  Retry waits are capped at the same 30s as the backoff they substitute (the raised
+  RateLimitError still carries the uncapped value for the API response header).
+- LLM `content: null` (reasoning-style endpoints, or thinking models that exhaust a
+  `max_tokens` cap) returned the literal string "None" as the coach's answer; it is now an
+  error, with a `reasoning_content` fallback for the ping path.
+- Single-instance guard: the zero-byte window between O_EXCL create and payload write let a
+  second simultaneous launch delete the winner's lock (both instances survived), and exit
+  unconditionally unlinked the lock - including a successor's after a crash-and-takeover.
+  Empty locks get a short grace window; release only removes a lock naming our own pid.
+- A corrupt or future-schema config.toml started fine and then 500'd every endpoint; `coach`
+  now probes the config at startup and refuses with exit code 2, naming the file.
+- `ALGOCOACH_*` environment overrides bypassed the range policy the settings API enforces
+  (`ALGOCOACH_REQUEST_INTERVAL=0.01` silently disabled the pacing gate); bounds moved to
+  `lc.config` and are enforced in `validate_environment` too.
+- `read_problem_state` read statement/code/testcases with no OSError guard while sibling
+  reads degraded to empty - one Windows sharing violation turned a plain GET into a 500.
+- HTTPException sites carrying i18n keys (404 problem, 409 sync conflict, 400 not configured)
+  never emitted `message_key`, so their wording followed the backend process locale; they now
+  go through a structured `http_domain_error()` helper recognized by the frontend.
+- Stale hashed chunks after a redeploy were rewritten to index.html (JS request receiving
+  HTML), silently killing every navigation from an old tab; asset-shaped misses now 404 and
+  `router.onError` reloads the page on chunk failures. Router also gained `scrollBehavior`,
+  and the sidebar now highlights Problems while on the workbench.
+- Notes autosave was cancelled (not flushed) on leave/problem-switch, silently dropping the
+  last keystrokes; both debounced saves now flush with the explicit old qid. Editor snapshots
+  are debounced (300ms) instead of serializing localStorage on every keystroke.
+- Network-level fetch failures (`TypeError: Failed to fetch`) leaked raw English browser text
+  into the UI; they are normalized to a localized message. History distinguishes an empty
+  filter result from an empty archive, and the workbench difficulty chip is localized.
+
+**Tests & tooling**
+
+- i18n parity guard: backend message keys must exist in both frontend locale blocks
+  (11 of 15 were missing from the JS catalog, invisible to the literal-only check script);
+  the script now fails loudly when catalog extraction yields zero keys.
+- Test-singleton hygiene: `reset_app_state()` also resets the sync engine (a failed sync used
+  to leak `_running/_failed` rows into later tests), and three hand-rolled `_archive = None`
+  resets were converged onto it.
+- Packaging contract enforced: `npm run dist` (cross-platform copy to `server/webdist/`)
+  replaces the POSIX-only shell snippet, and a new CI `package` job builds the wheel and
+  asserts it ships `server/webdist/index.html`.
+- Coverage moved out of pytest `addopts` (it ran on all 9 CI matrix cells without ever being
+  consumed) into a single gated CI cell (`--cov-fail-under=80`, currently ~87%); ruff is
+  pinned to the dev-extra floor, pip caching added, the TOML-fallback CI comment corrected
+  (only 3.10 lacks stdlib tomllib), and a vacuous `_pid_alive` assertion now checks the
+  property it claims to.
+
 ### UI minimalism & decoupled LLM settings (2026-08-26)
 
 **Features**

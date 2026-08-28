@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "dist": "npm run build && node scripts/copy-dist.mjs",
     "preview": "vite preview",
     "test": "vitest run",
     "lint": "eslint src",

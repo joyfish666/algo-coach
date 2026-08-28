@@ -11,10 +11,10 @@ def isolated_env(tmp_path, monkeypatch):
     home.mkdir()
     monkeypatch.setenv("ALGOCOACH_HOME", str(home))
     auth.reset_state()
-    api_module._archive = None
+    api_module.reset_app_state()
     yield
     auth.reset_state()
-    api_module._archive = None
+    api_module.reset_app_state()
 
 
 @pytest.fixture

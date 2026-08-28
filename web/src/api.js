@@ -43,9 +43,11 @@ async function handle(response) {
     }
     // single point where server error payloads become user-visible text:
     // prefer the localized message_key so wording follows the UI language
-    // instead of the backend process locale
+    // instead of the backend process locale. Domain errors carry it under
+    // error.message_key; HTTPException sites carry it under detail.message_key.
     const message =
       translateMessageKey(payload?.error?.message_key) ||
+      translateMessageKey(payload?.detail?.message_key) ||
       (payload && payload.error && payload.error.message) ||
       (typeof payload?.detail === 'string' ? payload.detail : null) ||
       `HTTP ${response.status}`
@@ -75,6 +77,14 @@ async function request(url, options = {}) {
     if (err instanceof DOMException && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
       const i18n = useI18nStore()
       throw new Error(i18n.t('request_timeout'), { cause: err })
+    }
+    if (err instanceof TypeError) {
+      // fetch rejects with TypeError for refused/unreachable connections
+      // ("Failed to fetch" / "NetworkError when attempting to fetch resource"):
+      // the raw browser text used to leak into the UI, in English, inside a
+      // zh interface - indistinguishable from a bug
+      const i18n = useI18nStore()
+      throw new Error(i18n.t('network_unreachable'), { cause: err })
     }
     throw err
   }

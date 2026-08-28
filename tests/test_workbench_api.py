@@ -198,7 +198,7 @@ def test_create_adapter_lazy_initializes_from_config(client, monkeypatch):
     data["request_interval"] = 3.0
     config.save(data)
     auth.reset_state()
-    api_module._archive = None
+    api_module.reset_app_state()
 
     adapter = api_module.create_adapter()
     session = auth.get_session()

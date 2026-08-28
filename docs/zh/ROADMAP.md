@@ -114,6 +114,34 @@
 | 逻辑 | `coach` 启动即崩：`uvicorn.Config(sock=...)` 从不接受该参数 | 预绑定 socket 应走 `Server.run(sockets=[...])`；真实启动路径无测试覆盖 → 修复并回填 PITFALLS |
 | 测试 | 后端 216→227（llm/test 六用例：未配置 400/保存配置/payload 覆盖/部分回退/NetworkError→502/未知字段 422；thinking 映射与校验；analyze ai_configured 回归）；前端 89→90（清空对话按钮状态机） | 新端点与映射逻辑逐分支配测试；测试污染（类属性赋值泄漏）改用 monkeypatch 自动还原 |
 
+### 第六批（用户/开发者双视角体检，2026-08-28）
+
+| 类别 | 交付/修复 | 根因 |
+|---|---|---|
+| Bug | 工作台挂载/切题即静默损坏已保存代码：`loadProblem` 先赋 `problem.value` 再改 `lang.value`，而 Vue watcher 异步 flush，`!problem.value` 守卫在回调执行时已失效——加载被当成「用户切换语言」，把刚加载的代码用**旧语言** PUT 覆盖无关的 `solution.*`，随后再用新模板覆写编辑器内容 | 「程序化赋值」与「用户切换」两个事件共用一个无差别 watcher；守卫只检查赋值时点的快照，不检查 flush 时点 → 引入跨 nextTick 的 hydration 栅栏，程序化赋值（加载/模板应用/切换失败回退）全程抑制 watcher |
+| Bug | 切换语言模板拉取失败回退选框时，watcher 再次触发把当前（旧语言）代码写到失败语言的文件里 | 回退赋值与用户切换不可区分 → 同一 hydration 栅栏覆盖回退路径 |
+| 功能 | 重开题目续用上次语言：`read_problem_state` 返回最近写入的 `solution.*`（mtime 最新）而非配置默认语言 | 两侧都没有「这题上次用什么语言」的记忆——python3 用户重开题目落在空白的 C++ 编辑器里，代码其实还在盘上但无从知晓；模板拉取与判定前保存都恰好更新对应语言文件的 mtime，它就是天然的「上次在玩哪个语言」记录 |
+| 功能 | AI 教练面板未配置 LLM 时显示引导横幅（含设置页链接）并禁用发送；`GET /api/status` 新增 `llm_configured` | 分析页有未配置门控而工作台没有，用户只能靠每次发送失败的错误气泡发现缺 Key——两个 LLM 入口共用状态却各写一套门控 |
+| 功能 | 分析页报告渲染后出现「重新生成」按钮 | 报告存在与否曾是生成按钮的唯一开关，导入新提交后无法刷新报告 |
+| 逻辑 | config.toml 多个整文件写者（设置保存/轮换持久化/清除数据）各自为政：设置保存可被并发轮换持久化的旧快照整体回滚；清除数据后未过 still-current 复核的在途持久化可把已擦除的 Cookie 复活进新 config.toml | 互斥锁放在了某一个调用方（auth._persist_lock）而不是文件旁边 → 锁收敛进 `lc.config.update_lock()`；持久化的 still-current 复核移入临界区内部；清除数据先重置 auth 再删文件 |
+| 逻辑 | Windows 上 `os.replace` 与无锁读冲突：CPython 打开文件不带 FILE_SHARE_DELETE，并发读者（GET /api/problems 流式读 problems.json）会让原子替换抛 PermissionError → 随机 500/假同步失败 | 「原子替换使裸读安全」只在 POSIX 成立 → 新建 `lc/atomicio.py` 单点原语：有界重试吸收微秒级读者窗口，config/favorites/problems cache/工作区四处写盘全部收敛 |
+| 逻辑 | 提交成功后归档 append 的 OSError 会把已无法重放的判定包成 500，诱导用户重复提交 | 致命（提交）与瞬态（落盘）错误策略未对齐 → 归档失败降级为 `archived:false` + 前端 toast 提示 |
+| 逻辑 | `read_problem_state` 里 statement/code/testcases 三个裸读没有 OSError 守卫（同函数的 cases/notes 却有）；模板读取同样裸奔 | 同一模块内降级策略漂移 → 统一「瞬时读失败降级为空」 |
+| 逻辑 | 429 的 `Retry-After` 原样照睡：恶意/故障响应头可让同步线程睡一天且无法取消 | 退避有封顶而 Retry-After 没有 → 重试等待同样封顶 30s（抛出的 RateLimitError 仍携带原值供响应头使用） |
+| 逻辑 | LLM 返回 `content: null`（推理型端点/思考耗尽 max_tokens）被 `str(None)` 成字面量 "None" 当回答返回 | 形状守卫只捕缺失/结构错误，不捕 None → 视为空回答报错，`reasoning_content` 非空时先回退（否则 max_tokens 限幅的连接测试对思考模型必失败） |
+| 逻辑 | 单实例守卫两个漏洞：O_EXCL 建文件与写 payload 之间的零字节窗口会被第二个并发启动当成「陈旧锁」删掉赢家的锁（双双存活）；退出时无条件 unlink 会删掉接管者的锁 | 锁内容与锁存在性被当成同时成立；释放不核对归属 → 零字节窗口给短宽限期（期间重读），释放仅当 payload 记录的 pid 是自己 |
+| 逻辑 | 手改的/未来版本的 config.toml 让服务正常启动后所有接口 500 | 配置文件没有像环境变量一样在启动门口失败 → `coach` 启动时 `effective_config()` 探测，失败打印文件路径并退出码 2 |
+| 逻辑 | `ALGOCOACH_REQUEST_INTERVAL=0.01` 启动通过，静默关掉限速闸门 | 范围策略只定义在 settings API 一处，env 覆盖旁路 → 边界常量上移 `lc.config`，`validate_environment` 与 API 共用同一策略 |
+| UI/逻辑 | `HTTPException(detail=t(key))` 端点（404 题目/409 同步冲突/400 未配置 LLM 等）从不携带 message_key，前端只能显示后端进程 locale 渲染的文本；前端补齐了 10 个缺失的后端 message_key（10/15 曾缺失） | 结构化错误形状只覆盖领域异常一条路 → 统一 `http_domain_error()` 助手让 HTTPException 也携带 message_key；前端 api 层识别 `detail.message_key` |
+| UI | 后端已重启/断连时前端裸显英文 "Failed to fetch"；History 筛选无结果显示「还没有提交记录」；工作台难度 chip 显示原始英文枚举；工作台在侧边栏无激活态；导航滚动位置跨页残留 | 浏览器网络异常未做归一化；空态一稿两用；难度映射漏了工作台一处；路由记录与 /problem/:qid 无前缀关联；无 scrollBehavior → api 层 TypeError 归一为本地化文案；History 区分两种空态；复用 diff_* 目录；problem-detail 高亮题库项；补 scrollBehavior |
+| UI | 重新部署后旧标签页引用的哈希 chunk 404，被 SPA 回退改写成 index.html（JS 请求收到 HTML），所有点击静默失效 | catch-all 回退不区分「深链路径」与「资源路径」→ 资源形态（含扩展名）未命中一律 404；router.onError 检测 chunk 失败后整页刷新接管 |
+| UI/逻辑 | 笔记自动保存只在切换/离开时被取消而非冲刷（最后一次按键永久丢失）；代码快照每次按键同步写 localStorage | 代码与笔记两套 debounce 只有一套有 flush 路径；快照写入没有防抖 → 离开/切题/关闭三处统一 flush（显式传旧 qid 防错题写入）；快照 300ms 防抖 |
+| 测试 | i18n 平价无护栏：check:i18n 只能查字面 `t('...')`，服务端驱动的动态 `t(key)` 全部不可见（后端 15 键缺 11 个仍全绿）；check 脚本目录形状变了会提取到 0 键并静默全绿 | 动态键用法超出静态扫描能力 → 新增 pytest 平价测试（后端 catalog ⊆ 前端两 locale 块）+ 提取零键 fail-loud + 防空转锚定 |
+| 测试 | conftest 重置不覆盖同步引擎单例：任一同步用例失败会把 `_running/_failed/rows` 泄漏给后续用例（409 级联或跨数据目录「续传」）；3 个测试文件手搓 `_archive = None` 第二套重置习语 | reset_app_state 只重置了归档 → 收敛（引擎并入 reset_app_state），手搓处全部改调用 |
+| 测试 | 打包契约零验证：vite 产物 web/dist → server/webdist 的拷贝只存在于 DEVELOPMENT.md 的 POSIX shell 片段里，漏拷会发出 UI-less wheel 且无任何环节能发现 | 契约只写在文档里 → `npm run dist`（跨平台 copy 脚本）+ CI 新增 package job：构建后 `python -m build` 并断言 wheel 内含 `server/webdist/index.html` |
+| 测试 | 覆盖率纯装饰：`--cov` 在 addopts 里 9 个 CI 矩阵格各算一遍且从无门槛无消费；CI 注释错误声称 3.10/3.11 都走 TOML 回退解析（tomllib 3.11 已内置，只有 3.10 走回退）；ruff 未锁版本；pytest 矩阵无 pip 缓存；test_cli_guard 有一处恒真断言 | 覆盖率加在没人看的位置 → 移出 addopts，CI 单格 `--cov-fail-under=80`（当前 87%）；其余逐项修正 |
+| 文档 | 本批全部改动同步进 USAGE / ARCHITECTURE / DEVELOPMENT / PITFALLS（新增 7 条坑）与双语 README | 文档随实现同步是仓库既定规则 |
+
 ### 登记【延】
 
 - **浏览器级 E2E（Playwright 等）**：当前以路由 smoke（全部懒加载 chunk 可解析 +

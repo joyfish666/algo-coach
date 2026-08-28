@@ -39,6 +39,9 @@ from lc.logutil import setup_logging
 LOCK_FILE_NAME = INSTANCE_LOCK_NAME
 LOG_FILE_NAME = "coach.log"
 STILL_ACTIVE = 259
+# how long acquire_instance_lock tolerates a lock file that exists but does
+# not parse yet (the winner between O_EXCL create and its payload write)
+_LOCK_GRACE_SECONDS = 2.0
 
 
 def lock_path():
@@ -65,30 +68,58 @@ def _pid_alive(pid: int) -> bool:
         return False
 
 
+def _read_lock_info(path) -> dict | None:
+    """Parse the lock payload; None means "created but not written yet".
+
+    acquire_instance_lock creates the file with O_CREAT|O_EXCL and writes
+    the pid payload only afterwards, so a second process launched in the
+    same instant can legitimately observe a zero-byte file. Distinguishing
+    that window from real garbage is what keeps two simultaneous launches
+    from stripping each other's locks and both surviving.
+    """
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except OSError:
+        return {}
+    if not raw.strip():
+        return None
+    try:
+        return json.loads(raw)
+    except ValueError:
+        return {}
+
+
 def acquire_instance_lock(port: int):
     """Atomically create the instance lock for the given port.
 
     Returns (True, "") on success, or (False, refusal message) when another
     live instance owns the lock. Stale locks from dead processes are removed
-    and creation retried.
+    and creation retried; a just-created empty lock gets a short grace
+    window because its writer may simply not have flushed the payload yet.
     """
     path = lock_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = json.dumps({"pid": os.getpid(), "port": port}).encode("utf-8")
+    deadline = time.monotonic() + _LOCK_GRACE_SECONDS
     while True:
         try:
             fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
         except FileExistsError:
-            try:
-                info = json.loads(path.read_text(encoding="utf-8"))
-            except (OSError, ValueError):
-                info = {}
+            info = _read_lock_info(path)
             if _pid_alive(info.get("pid")):
                 return False, info
+            if info is None and time.monotonic() < deadline:
+                time.sleep(0.05)
+                continue
             try:
                 path.unlink()
             except OSError:
-                pass
+                if time.monotonic() < deadline:
+                    time.sleep(0.05)
+                    continue
+                # cannot read OR recycle the lock: refuse rather than risk
+                # becoming a second live instance
+                return False, info or {}
             continue
         try:
             os.write(fd, payload)
@@ -98,10 +129,19 @@ def acquire_instance_lock(port: int):
 
 
 def release_instance_lock() -> None:
-    try:
-        lock_path().unlink()
-    except OSError:
-        pass
+    """Remove the lock file only when it still records our own pid.
+
+    Unlinking unconditionally deleted the *successor's* lock after a
+    crash-and-takeover, reopening the double-instance window the guard
+    exists to close.
+    """
+    path = lock_path()
+    info = _read_lock_info(path)
+    if isinstance(info, dict) and info.get("pid") == os.getpid():
+        try:
+            path.unlink()
+        except OSError:
+            pass
 
 
 def probe_is_coach(host: str, port: int) -> bool:
@@ -190,13 +230,23 @@ def main(argv=None):
         return 1
 
     # fail at the door, not as a 500 on every API call later
-    from lc.config import validate_environment
+    from lc.config import config_path, effective_config, validate_environment
 
     try:
         validate_environment()
     except ValueError as exc:
         print(f"[coach] refusing to start: {exc}")
         print("[coach] fix or remove the environment variable above, then relaunch.")
+        return 2
+
+    # same door for the config file: a corrupt hand-edited or future-schema
+    # config.toml used to start fine (banner printed) and then explode as a
+    # TOMLDecodeError inside effective_config() on every endpoint
+    try:
+        effective_config()
+    except (OSError, ValueError) as exc:
+        print(f"[coach] refusing to start: config file could not be read: {exc}")
+        print(f"[coach] fix or remove {config_path()}, then relaunch.")
         return 2
 
     try:

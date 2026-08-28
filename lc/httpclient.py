@@ -10,7 +10,10 @@ Discipline enforced here for every outbound call:
   decides whether to retry
 - UTF-8 response decoding, browser UA/Referer injection
 - 429 handling: Retry-After first (integer seconds or HTTP-date), otherwise
-  exponential backoff 1s -> 2s -> 4s capped at 30s
+  exponential backoff 1s -> 2s -> 4s capped at 30s; the Retry-After *wait*
+  is capped at the same 30s so a hostile or broken header cannot park the
+  calling thread (e.g. a sync worker) for hours - the uncapped value is kept
+  on the raised RateLimitError for the API's Retry-After response header
 """
 
 from __future__ import annotations
@@ -180,11 +183,10 @@ class HttpClient:
             if response.status_code == 429:
                 retry_after = parse_retry_after(response.headers.get("Retry-After"))
                 if idempotent and attempt <= self.max_retries:
-                    wait = (
-                        retry_after
-                        if retry_after is not None
-                        else self._backoff_delay(attempt)
-                    )
+                    if retry_after is not None:
+                        wait = min(retry_after, BACKOFF_CAP_SECONDS)
+                    else:
+                        wait = self._backoff_delay(attempt)
                     logger.warning(
                         "429 on %s %s (attempt %s/%s), backing off %.1fs",
                         method,
@@ -219,5 +221,5 @@ class HttpClient:
     def _retry_wait_for_transient(self, response, attempt: int) -> float:
         retry_after = parse_retry_after(response.headers.get("Retry-After"))
         if retry_after is not None:
-            return retry_after
+            return min(retry_after, BACKOFF_CAP_SECONDS)
         return self._backoff_delay(attempt)

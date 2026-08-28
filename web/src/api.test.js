@@ -55,6 +55,31 @@ describe('api error translation', () => {
     expect(err.message).toBe('raw text')
   })
 
+  it('translates message_key carried in structured HTTPException details', async () => {
+    // HTTPException sites (sync conflict, ask-not-configured, 404s) used to
+    // ship backend-locale text with no key; the frontend must translate them
+    // like domain errors
+    useI18nStore().set('zh')
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        errorResponse(409, {
+          detail: { kind: 'HTTPException', message_key: 'sync_in_progress', message: '题库同步正在进行中' },
+        })
+      )
+    )
+    const err = await api.startSync().catch((e) => e)
+    expect(err.message).toBe('题库同步正在进行中')
+  })
+
+  it('maps network-level failures to a localized message instead of raw browser text', async () => {
+    useI18nStore().set('zh')
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')))
+    const err = await api.getStatus().catch((e) => e)
+    expect(err.message).toBe('无法连接本地服务：请确认 coach 进程仍在运行')
+    expect(err.message).not.toContain('Failed to fetch')
+  })
+
   it('falls back to HTTP status text without an error payload', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(errorResponse(500, null)))
     const err = await api.getStatus().catch((e) => e)

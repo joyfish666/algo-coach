@@ -91,7 +91,9 @@ onMounted(loadHistory)
     </div>
 
     <div v-else-if="!records.length" class="card empty-state" data-testid="history-empty">
-      <p>{{ i18n.t('history_empty') }}</p>
+      <!-- one message claimed "no submissions at all" when a filter merely
+           matched nothing, making users doubt the filter had applied -->
+      <p>{{ qidFilter.trim() ? i18n.t('history_no_match') : i18n.t('history_empty') }}</p>
     </div>
 
     <div v-else class="card" data-testid="history-table-card">

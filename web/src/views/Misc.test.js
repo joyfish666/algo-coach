@@ -121,6 +121,35 @@ describe('Analyze view', () => {
     expect(wrapper.find('[data-testid="ai-report"]').exists()).toBe(true)
   })
 
+  it('offers a regenerate action once a report is rendered', async () => {
+    // report presence used to be the sole toggle for the generate button:
+    // after importing new submissions there was no way to refresh the report
+    // without a full page reload
+    apiMocks.analyze.mockResolvedValue({
+      stats: { solved_total: 1, by_difficulty: { easy: 1, medium: 0, hard: 0 } },
+      tags: [],
+      recommendations: [],
+      ai_report: '**第一版报告**',
+      ai_configured: true,
+    })
+    const wrapper = mount(Analyze, {
+      global: { plugins: [createPinia()], stubs: { RouterLink: { template: '<a><slot/></a>' } } },
+    })
+    await flushPromises()
+    expect(wrapper.find('[data-testid="generate-report"]').exists()).toBe(false)
+
+    apiMocks.analyze.mockResolvedValueOnce({
+      stats: { solved_total: 2, by_difficulty: { easy: 2, medium: 0, hard: 0 } },
+      tags: [],
+      recommendations: [],
+      ai_report: '**第二版报告**',
+      ai_configured: true,
+    })
+    await wrapper.find('[data-testid="regenerate-report"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="ai-report"]').html()).toContain('第二版报告')
+  })
+
   it('surfaces a failed AI generation inline instead of tearing down the page', async () => {
     apiMocks.analyze
       .mockResolvedValueOnce({

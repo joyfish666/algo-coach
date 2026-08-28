@@ -2,30 +2,43 @@ import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 
+import { useStatusStore } from '../stores/status'
+
 const askMock = vi.fn()
 
 vi.mock('../api', () => ({
   api: {
     ask: (...args) => askMock(...args),
+    getStatus: () => Promise.resolve({ llm_configured: true }),
   },
 }))
 
 import AiChatSidebar from './AiChatSidebar.vue'
 
+let pinia
+
 function mountPanel(qid = 'two-sum') {
   return mount(AiChatSidebar, {
     props: { qid },
-    global: { plugins: [createPinia()] },
+    global: {
+      plugins: [pinia],
+      stubs: { RouterLink: { template: '<a><slot/></a>' } },
+    },
     attachTo: document.body,
   })
 }
 
 describe('ai chat sidebar', () => {
   beforeEach(() => {
-    setActivePinia(createPinia())
+    pinia = createPinia()
+    setActivePinia(pinia)
     localStorage.clear()
     document.body.innerHTML = ''
     askMock.mockReset()
+    // most tests exercise the configured path; the not-configured gate has
+    // its own test below. Marking the store loaded keeps the component from
+    // re-fetching status on mount and overwriting the seeded value.
+    Object.assign(useStatusStore(), { loaded: true, llmConfigured: true })
   })
 
   it('clears the conversation via the header button and disables itself when empty', async () => {
@@ -150,6 +163,22 @@ describe('ai chat sidebar', () => {
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
     await flushPromises()
     expect(wrapper.find('[data-testid="ai-panel"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('gates sending behind an LLM-not-configured hint pointing at Settings', async () => {
+    // the workbench used to be the only LLM surface without a not-configured
+    // gate: users discovered the missing key from an error bubble per send
+    Object.assign(useStatusStore(), { loaded: true, llmConfigured: false })
+    const wrapper = mountPanel()
+    await wrapper.find('[data-testid="ai-open"]').trigger('click')
+
+    expect(wrapper.find('[data-testid="ai-not-configured"]').exists()).toBe(true)
+
+    await wrapper.find('textarea').setValue('怎么解？')
+    await wrapper.find('[data-testid="ai-send"]').trigger('click')
+    await flushPromises()
+    expect(askMock).not.toHaveBeenCalled()
     wrapper.unmount()
   })
 })

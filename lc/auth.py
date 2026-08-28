@@ -200,15 +200,20 @@ def _persist_rotated_cookies(client) -> None:
     on-disk cookie goes stale while the in-memory one works, and vice versa
     when other processes probe with the old value.
 
-    Serialized behind _persist_lock so a sync-worker thread and an API thread
-    cannot interleave load/save and lose an update; the in-memory cache skips
-    the disk round-trip entirely while the cookie is unchanged (the steady
-    state for every response). A client that has since been replaced by
-    rebuild() never writes: its late-arriving responses would otherwise
-    resurrect superseded credentials over the freshly configured ones.
+    The whole load→merge→save runs inside config.update_lock(): config.toml
+    has several whole-file writers (settings API, data wipe) and a
+    caller-local lock only protected this window, letting a concurrent
+    settings save be reverted by the stale snapshot persisted here. The
+    still-current check sits INSIDE that critical section: after a data wipe
+    resets auth, a persist that already passed the check must fail it again
+    instead of writing the old cookie back into a fresh config.toml. A client
+    that has since been replaced by rebuild() never writes for the same
+    reason. Lock order is _persist_lock → config.update_lock → _state_lock
+    everywhere; no path may acquire _persist_lock while holding the config
+    lock (update_settings releases the config lock before calling rebuild).
     """
     global _last_persisted_cookie
-    from lc.config import load as load_config, save as save_config
+    from lc import config as config_module
 
     jar = client.session.cookies
     session_value = jar.get("LEETCODE_SESSION")
@@ -216,27 +221,30 @@ def _persist_rotated_cookies(client) -> None:
         return
     csrf_value = jar.get("csrftoken") or ""
     with _persist_lock:
-        with _state_lock:
-            still_current = _http_client is client
-        if not still_current:
-            return
-        current = load_config()
-        updates = {"LEETCODE_SESSION": session_value}
-        if csrf_value:
-            # csrftoken first keeps the canonical pair order of a freshly
-            # built cookie string identical to what setup writes
-            updates = {"csrftoken": csrf_value, "LEETCODE_SESSION": session_value}
-        new_cookie = _merge_rotated_cookie(str(current.get("cookie", "") or ""), updates)
-        if new_cookie == _last_persisted_cookie:
-            return
-        if current.get("cookie") == new_cookie:
+        with config_module.update_lock():
+            with _state_lock:
+                still_current = _http_client is client
+            if not still_current:
+                return
+            current = config_module.load()
+            updates = {"LEETCODE_SESSION": session_value}
+            if csrf_value:
+                # csrftoken first keeps the canonical pair order of a freshly
+                # built cookie string identical to what setup writes
+                updates = {"csrftoken": csrf_value, "LEETCODE_SESSION": session_value}
+            new_cookie = _merge_rotated_cookie(
+                str(current.get("cookie", "") or ""), updates
+            )
+            if new_cookie == _last_persisted_cookie:
+                return
+            if current.get("cookie") == new_cookie:
+                _last_persisted_cookie = new_cookie
+                return
+            current["cookie"] = new_cookie
+            if csrf_value:
+                current["csrf_token"] = csrf_value
+            config_module.save(current)
             _last_persisted_cookie = new_cookie
-            return
-        current["cookie"] = new_cookie
-        if csrf_value:
-            current["csrf_token"] = csrf_value
-        save_config(current)
-        _last_persisted_cookie = new_cookie
 
 
 def rebuild(cookie_string: str = "", **kwargs):

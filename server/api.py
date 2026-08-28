@@ -32,7 +32,16 @@ from urllib.parse import urlparse
 import lc
 from lc import auth, favorites, judge, problems
 from lc.archive import Archive, build_record, compute_stats, recommend_problems, tag_mastery
-from lc.config import effective_config, save as save_config, workspace_root_path
+from lc.config import (
+    LLM_TIMEOUT_MAX,
+    LLM_TIMEOUT_MIN,
+    REQUEST_INTERVAL_MAX,
+    REQUEST_INTERVAL_MIN,
+    effective_config,
+    save as save_config,
+    update_lock,
+    workspace_root_path,
+)
 from lc.exceptions import (
     AlgoCoachError,
     AuthError,
@@ -113,11 +122,15 @@ def reset_app_state() -> None:
     """Drop lazily-built process singletons.
 
     Exists so embedders/tests can re-isolate the module after the data
-    directory changes; clear_local_data uses the same dance inline.
+    directory changes; clear_local_data uses the same dance inline. The sync
+    engine is reset here too: it is a module-level singleton whose run state
+    (running flag, accumulated rows) would otherwise leak an in-flight or
+    failed run across a data-directory swap.
     """
     global _archive
     with _archive_lock:
         _archive = None
+    _sync_engine.reset()
 
 
 def create_adapter() -> LeetCodeCnAdapter:
@@ -126,7 +139,7 @@ def create_adapter() -> LeetCodeCnAdapter:
         config = effective_config()
         cookie = str(config.get("cookie", "") or "")
         if not cookie:
-            raise HTTPException(status_code=400, detail=t("cookie_missing"))
+            raise http_domain_error(400, "cookie_missing")
         client = auth.configure(cookie, request_interval=config["request_interval"])
     return LeetCodeCnAdapter(client=client)
 
@@ -199,6 +212,25 @@ def _status_for(exc: AlgoCoachError) -> int:
     return 400
 
 
+def http_domain_error(status_code: int, message_key: str) -> HTTPException:
+    """HTTPException variant that still carries a message_key.
+
+    Plain `HTTPException(detail=t(key))` pre-rendered the message in the
+    backend process locale, so the frontend could not translate it into the
+    UI language the way it does for every domain error - sync conflicts and
+    LLM-not-configured replies were stuck in whatever locale the coach
+    process happened to run under.
+    """
+    return HTTPException(
+        status_code=status_code,
+        detail={
+            "kind": "HTTPException",
+            "message_key": message_key,
+            "message": t(message_key),
+        },
+    )
+
+
 @app.exception_handler(AlgoCoachError)
 async def domain_error_handler(request: Request, exc: AlgoCoachError):
     retry_after = getattr(exc, "retry_after", None)
@@ -248,6 +280,10 @@ def get_status():
         "version": lc.__version__,
         "site": "leetcode.cn",
         "configured": bool(config.get("cookie")),
+        # lets the AI coach sidebar gate on LLM availability the same way the
+        # analytics page does, instead of only failing after a send
+        "llm_configured": bool(config.get("llm_api_key"))
+        and bool(config.get("llm_base_url")),
         "data_dir": str(app_dir()),
         "sync": _sync_engine.progress(),
     }
@@ -311,84 +347,85 @@ class SettingsUpdate(BaseModel):
     workspace_root: str | None = None
 
 
-# Politeness bounds for the leetcode.cn rate limiter: below 0.5s the pacing
-# gate is effectively off (risking site-side throttling/bans), above 60s a
-# full sync would take hours. Values outside are rejected, not clamped, so
-# typos fail loudly instead of silently reconfiguring the limiter.
-REQUEST_INTERVAL_MIN = 0.5
-REQUEST_INTERVAL_MAX = 60.0
-
-LLM_TIMEOUT_MIN = 5.0
-LLM_TIMEOUT_MAX = 600.0
+# Range policy lives in lc.config (RANGE_LIMITS) so every write door -
+# settings API, env overrides, config file tooling - enforces the same
+# bounds. The API still rejects (not clamps) so typos fail loudly.
 
 
 @app.put("/api/settings")
 def update_settings(payload: SettingsUpdate):
-    provided = payload.model_fields_set
-    config = effective_config()
-    rebuild_needed = False
+    # the whole read→validate→mutate→save sequence holds the config update
+    # lock: a cookie rotation persisting concurrently used to write its stale
+    # whole-file snapshot afterwards and silently revert this save (including
+    # resurrecting the pre-save cookie). rebuild() deliberately happens after
+    # the lock is released - it acquires auth's persist lock, and no path may
+    # take that lock while holding the config lock.
+    with update_lock():
+        config = effective_config()
+        provided = payload.model_fields_set
+        rebuild_needed = False
 
-    updates = payload.model_dump(exclude_unset=True)
-    # one uniform rule for every field: an explicit null is a client bug
-    # (omitting the field already means "keep current value"). Letting nulls
-    # through used to mean a TypeError 500 for numeric fields and - worse -
-    # the string "None" silently written into config.toml for text fields.
-    null_fields = sorted(key for key, value in updates.items() if value is None)
-    if null_fields:
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                f"field(s) {', '.join(null_fields)} cannot be null; "
-                "omit them to keep the current value"
-            ),
-        )
-    if "request_interval" in updates:
-        interval = float(updates["request_interval"])
-        if not REQUEST_INTERVAL_MIN <= interval <= REQUEST_INTERVAL_MAX:
+        updates = payload.model_dump(exclude_unset=True)
+        # one uniform rule for every field: an explicit null is a client bug
+        # (omitting the field already means "keep current value"). Letting nulls
+        # through used to mean a TypeError 500 for numeric fields and - worse -
+        # the string "None" silently written into config.toml for text fields.
+        null_fields = sorted(key for key, value in updates.items() if value is None)
+        if null_fields:
             raise HTTPException(
                 status_code=422,
                 detail=(
-                    f"request_interval out of range "
-                    f"[{REQUEST_INTERVAL_MIN}, {REQUEST_INTERVAL_MAX}]: {interval}"
+                    f"field(s) {', '.join(null_fields)} cannot be null; "
+                    "omit them to keep the current value"
                 ),
             )
-    if "llm_timeout" in updates:
-        timeout = float(updates["llm_timeout"])
-        if not LLM_TIMEOUT_MIN <= timeout <= LLM_TIMEOUT_MAX:
+        if "request_interval" in updates:
+            interval = float(updates["request_interval"])
+            if not REQUEST_INTERVAL_MIN <= interval <= REQUEST_INTERVAL_MAX:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"request_interval out of range "
+                        f"[{REQUEST_INTERVAL_MIN}, {REQUEST_INTERVAL_MAX}]: {interval}"
+                    ),
+                )
+        if "llm_timeout" in updates:
+            timeout = float(updates["llm_timeout"])
+            if not LLM_TIMEOUT_MIN <= timeout <= LLM_TIMEOUT_MAX:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"llm_timeout out of range "
+                        f"[{LLM_TIMEOUT_MIN}, {LLM_TIMEOUT_MAX}]: {timeout}"
+                    ),
+                )
+        if "llm_thinking" in updates:
+            from lc.llm import THINKING_LEVELS
+
+            if updates["llm_thinking"] not in ("default", *THINKING_LEVELS):
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        "llm_thinking must be one of: default, "
+                        + ", ".join(THINKING_LEVELS)
+                        + f"; got {updates['llm_thinking']!r}"
+                    ),
+                )
+        if "cookie" in provided:
+            from lc.auth import extract_csrf_token
+
+            config["cookie"] = updates["cookie"]
+            config["csrf_token"] = extract_csrf_token(updates["cookie"])
+            rebuild_needed = True
+        config.update({key: value for key, value in updates.items() if key != "cookie"})
+
+        if "default_language" in updates and not is_supported(updates["default_language"]):
             raise HTTPException(
                 status_code=422,
-                detail=(
-                    f"llm_timeout out of range "
-                    f"[{LLM_TIMEOUT_MIN}, {LLM_TIMEOUT_MAX}]: {timeout}"
-                ),
+                detail=f"unsupported language: {updates['default_language']}",
             )
-    if "llm_thinking" in updates:
-        from lc.llm import THINKING_LEVELS
 
-        if updates["llm_thinking"] not in ("default", *THINKING_LEVELS):
-            raise HTTPException(
-                status_code=422,
-                detail=(
-                    "llm_thinking must be one of: default, "
-                    + ", ".join(THINKING_LEVELS)
-                    + f"; got {updates['llm_thinking']!r}"
-                ),
-            )
-    if "cookie" in provided:
-        from lc.auth import extract_csrf_token
-
-        config["cookie"] = updates["cookie"]
-        config["csrf_token"] = extract_csrf_token(updates["cookie"])
-        rebuild_needed = True
-    config.update({key: value for key, value in updates.items() if key != "cookie"})
-
-    if "default_language" in updates and not is_supported(updates["default_language"]):
-        raise HTTPException(
-            status_code=422,
-            detail=f"unsupported language: {updates['default_language']}",
-        )
-
-    save_config(config)
+        save_config(config)
     if rebuild_needed:
         auth.rebuild(config["cookie"], request_interval=config["request_interval"])
     logger.info("settings updated (fields=%s)", sorted(provided))
@@ -429,7 +466,7 @@ def test_llm_endpoint(payload: LlmTestPayload):
         updates.get("llm_thinking", "") or config.get("llm_thinking", "") or "default"
     )
     if not api_key or not base_url:
-        raise HTTPException(status_code=400, detail=t("ask_not_configured"))
+        raise http_domain_error(400, "ask_not_configured")
     timeout = min(float(config.get("llm_timeout", 120.0)), LLM_TEST_TIMEOUT_CAP)
     llm = LLMClient(
         base_url=base_url, api_key=api_key, model=model, timeout=timeout, thinking=thinking
@@ -472,7 +509,7 @@ def start_sync():
     with _lifecycle_lock:
         started = _sync_engine.begin(adapter, cache_path=None)
     if not started:
-        raise HTTPException(status_code=409, detail=t("sync_in_progress"))
+        raise http_domain_error(409, "sync_in_progress")
     return {"started": True, "progress": _sync_engine.progress()}
 
 
@@ -512,7 +549,7 @@ def _open_or_refresh(slug: str, refresh: bool) -> dict:
         problems.upsert_summary_into_cache(summary)
 
     if directory is None:
-        raise HTTPException(status_code=404, detail=t("problem_not_found"))
+        raise http_domain_error(404, "problem_not_found")
 
     state = problems.read_problem_state(directory, default_language=_default_lang())
     cache = problems.load_problems()
@@ -554,17 +591,23 @@ def get_template(qid: str, lang: str | None = None):
     workspace = _workspace_root()
     directory = problems.find_problem_dir(workspace, qid)
     if directory is None:
-        raise HTTPException(status_code=404, detail=t("problem_not_found"))
+        raise http_domain_error(404, "problem_not_found")
     result = problems.ensure_template(
         directory,
         lang,
         detail_provider=lambda: create_adapter().fetch_question_detail(qid),
     )
+    try:
+        code = result["path"].read_text(encoding="utf-8")
+    except OSError:
+        # same transient-read degrade policy as the workspace state reads; a
+        # Windows sharing violation on a file we just wrote must not 500
+        code = ""
     return {
         "slug": qid,
         "lang": lang,
         "status": result["status"],
-        "code": result["path"].read_text(encoding="utf-8"),
+        "code": code,
     }
 
 
@@ -578,7 +621,7 @@ def put_testcases(qid: str, payload: TestcasesPayload):
     workspace = _workspace_root()
     directory = problems.find_problem_dir(workspace, qid)
     if directory is None:
-        raise HTTPException(status_code=404, detail=t("problem_not_found"))
+        raise http_domain_error(404, "problem_not_found")
     problems.save_testcases(directory, payload.content)
     return {"slug": qid, "saved": True}
 
@@ -596,7 +639,7 @@ def put_solution(qid: str, payload: SolutionPayload):
     workspace = _workspace_root()
     directory = problems.find_problem_dir(workspace, qid)
     if directory is None:
-        raise HTTPException(status_code=404, detail=t("problem_not_found"))
+        raise http_domain_error(404, "problem_not_found")
     path = problems.save_solution(directory, payload.lang, payload.code)
     return {"slug": qid, "lang": payload.lang, "saved": True, "mtime": path.stat().st_mtime}
 
@@ -611,7 +654,7 @@ def put_notes(qid: str, payload: NotesPayload):
     workspace = _workspace_root()
     directory = problems.find_problem_dir(workspace, qid)
     if directory is None:
-        raise HTTPException(status_code=404, detail=t("problem_not_found"))
+        raise http_domain_error(404, "problem_not_found")
     problems.save_notes(directory, payload.content)
     return {"slug": qid, "saved": True}
 
@@ -675,7 +718,7 @@ def _resolve_judge_context(slug: str) -> tuple:
     workspace = _workspace_root()
     directory = problems.find_problem_dir(workspace, slug)
     if directory is None:
-        raise HTTPException(status_code=404, detail=t("problem_not_found"))
+        raise http_domain_error(404, "problem_not_found")
     meta = problems.load_meta(directory)
     question_id = str(meta.get("internal_question_id", "") or "")
     cache_rows = problems.load_problems()["problems"]
@@ -688,10 +731,7 @@ def _resolve_judge_context(slug: str) -> tuple:
     # opaque site-side error wrapped in a 502 - fail loudly instead
     question_id = question_id or str(frontend_row.get("frontend_id", "") or "")
     if not question_id:
-        raise HTTPException(
-            status_code=422,
-            detail=t("judge_missing_question_id"),
-        )
+        raise http_domain_error(422, "judge_missing_question_id")
     return (
         directory,
         question_id,
@@ -774,10 +814,18 @@ def judge_submit_endpoint(payload: JudgeSubmitPayload):
         lang=payload.lang,
     )
     verdict["mode"] = "submit"
-    _archive_verdict(
-        payload.qid, payload.lang, verdict, adapter=adapter, cache_rows=cache_rows
-    )
-    verdict["archived"] = True
+    try:
+        _archive_verdict(
+            payload.qid, payload.lang, verdict, adapter=adapter, cache_rows=cache_rows
+        )
+        verdict["archived"] = True
+    except OSError as exc:
+        # the submit itself succeeded and cannot be replayed - a local disk
+        # failure (full, locked by backup software) used to surface as a 500
+        # and invited a duplicate resubmission just to see the verdict again.
+        # Degrade like every other persist failure and tell the client.
+        logger.exception("archiving submit verdict failed: %s", exc)
+        verdict["archived"] = False
     return verdict
 
 
@@ -786,7 +834,7 @@ def _build_llm() -> LLMClient:
     api_key = str(config.get("llm_api_key", "") or "")
     base_url = str(config.get("llm_base_url", "") or "")
     if not api_key or not base_url:
-        raise HTTPException(status_code=400, detail=t("ask_not_configured"))
+        raise http_domain_error(400, "ask_not_configured")
     return LLMClient(
         base_url=base_url,
         api_key=api_key,
@@ -990,7 +1038,7 @@ def clear_local_data():
     unconfigured state immediately.
     """
     if _sync_engine.progress()["running"]:
-        raise HTTPException(status_code=409, detail=t("sync_in_progress"))
+        raise http_domain_error(409, "sync_in_progress")
 
     from lc.config import INSTANCE_LOCK_NAME, app_dir
 
@@ -998,31 +1046,33 @@ def clear_local_data():
     # running-check above sees it (409), or this wipe completes first and
     # the later sync starts fresh on an empty directory - no interleaving
     with _lifecycle_lock:
+        # auth reset comes FIRST, inside the wipe: an in-flight rotation
+        # persist must fail its still-current check instead of winning the
+        # config lock race and resurrecting the erased cookie into a fresh
+        # config.toml after the directory was declared clean
+        auth.reset_state()
         root = app_dir()
         cleared = []
-        if root.exists():
-            keep = {INSTANCE_LOCK_NAME}
-            for entry in sorted(root.iterdir()):
-                if entry.name in keep:
-                    continue
-                try:
-                    if entry.is_dir():
-                        import shutil
+        # the config update lock keeps a concurrent settings save or rotation
+        # persist from interleaving with the deletion of config.toml
+        with update_lock():
+            if root.exists():
+                keep = {INSTANCE_LOCK_NAME}
+                for entry in sorted(root.iterdir()):
+                    if entry.name in keep:
+                        continue
+                    try:
+                        if entry.is_dir():
+                            import shutil
 
-                        shutil.rmtree(entry)
-                    else:
-                        entry.unlink()
-                    cleared.append(entry.name)
-                except OSError as exc:
-                    logger.warning("could not remove %s: %s", entry, exc)
+                            shutil.rmtree(entry)
+                        else:
+                            entry.unlink()
+                        cleared.append(entry.name)
+                    except OSError as exc:
+                        logger.warning("could not remove %s: %s", entry, exc)
 
-        auth.reset_state()
-        global _archive
-        with _archive_lock:
-            _archive = None
-        # stale engine accumulators would otherwise surface as a bogus
-        # "resumable" progress snapshot pointing at wiped data
-        _sync_engine.reset()
+        reset_app_state()
     logger.info("local data cleared: %s", cleared)
     return {"cleared": cleared, "data_dir": str(root)}
 
@@ -1062,6 +1112,13 @@ def spa_fallback(full_path: str):
                     )
                 },
             )
+        last_segment = full_path.rstrip("/").rsplit("/", 1)[-1]
+        if "." in last_segment:
+            # asset-shaped misses (a hashed chunk from before a redeploy)
+            # must 404: rewriting them to index.html answered a JS request
+            # with HTML, and the browser reported an opaque MIME error while
+            # every navigation from the stale tab silently died
+            raise HTTPException(status_code=404, detail="not found")
         index = dist_root / "index.html"
         if index.is_file():
             return FileResponse(index, headers={"Cache-Control": "no-cache"})

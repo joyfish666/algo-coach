@@ -17,6 +17,7 @@ import json
 import threading
 from pathlib import Path
 
+from lc.atomicio import atomic_write_text
 from lc.config import favorites_path
 
 _LOCK = threading.Lock()
@@ -43,13 +44,10 @@ def load_favorites(path: Path | None = None) -> set:
 def _save_locked(slugs, target: Path) -> None:
     """Write the index atomically; caller must hold _LOCK."""
     ordered = sorted({str(slug) for slug in slugs if slug})
-    target.parent.mkdir(parents=True, exist_ok=True)
-    tmp = target.with_name(target.name + ".tmp")
-    tmp.write_text(
+    atomic_write_text(
+        target,
         json.dumps({"schema": 1, "slugs": ordered}, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
     )
-    tmp.replace(target)
 
 
 def save_favorites(slugs, path: Path | None = None) -> None:
@@ -67,8 +65,10 @@ def set_favorite(slug: str, favorite: bool, path: Path | None = None) -> bool:
 
     The whole read-modify-write runs under _LOCK: concurrent toggles of two
     different slugs must both survive instead of the later save clobbering
-    the earlier one's change (load_favorites reads without the lock on
-    purpose - atomic replace makes plain reads safe).
+    the earlier one's change. Plain reads stay lock-free on purpose - the
+    atomic replace keeps readers from seeing torn content, and lc.atomicio's
+    rename retry absorbs the Windows sharing-violation window that a
+    concurrent reader would otherwise open under the writer.
     """
     slug = str(slug or "")
     if not slug:

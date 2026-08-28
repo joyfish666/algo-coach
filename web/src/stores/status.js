@@ -11,9 +11,11 @@ export const useStatusStore = defineStore('status', {
     loaded: false,
     reachable: true,
     configured: false,
+    llmConfigured: false,
     version: '',
     dataDir: '',
     sync: {},
+    refreshedAt: 0,
   }),
   actions: {
     refresh() {
@@ -22,10 +24,12 @@ export const useStatusStore = defineStore('status', {
         try {
           const data = await api.getStatus()
           this.configured = Boolean(data.configured)
+          this.llmConfigured = Boolean(data.llm_configured)
           this.version = data.version || ''
           this.dataDir = data.data_dir || ''
           this.sync = data.sync || {}
           this.reachable = true
+          this.refreshedAt = Date.now()
         } catch {
           this.reachable = false
         } finally {

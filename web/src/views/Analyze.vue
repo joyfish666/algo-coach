@@ -182,7 +182,21 @@ onMounted(() => loadAnalyze(false))
             >
               {{ generating ? i18n.t('analyze_ai_generating') : i18n.t('analyze_ai_generate') }}
             </button>
-            <div v-else class="report" data-testid="ai-report" v-html="aiReportHtml"></div>
+            <template v-else>
+              <div class="report" data-testid="ai-report" v-html="aiReportHtml"></div>
+              <!-- report presence used to be the sole toggle for the action:
+                   after importing new submissions there was no way to refresh
+                   the report short of a full page reload -->
+              <button
+                class="btn btn-ghost btn-sm regenerate"
+                type="button"
+                :disabled="generating"
+                data-testid="regenerate-report"
+                @click="loadAnalyze(true)"
+              >
+                {{ generating ? i18n.t('analyze_ai_generating') : i18n.t('analyze_ai_regenerate') }}
+              </button>
+            </template>
             <p v-if="generating" class="placeholder">{{ i18n.t('analyze_loading') }}</p>
           </template>
           <p v-else class="placeholder">{{ i18n.t('analyze_ai_disabled') }}</p>
@@ -268,6 +282,10 @@ onMounted(() => loadAnalyze(false))
 
 .report :deep(p) {
   margin: var(--space-2) 0;
+}
+
+.regenerate {
+  margin-top: var(--space-3);
 }
 
 @media (max-width: 960px) {

@@ -56,7 +56,10 @@ server = ["webdist/**/*"]
 testpaths = ["tests"]
 # live-network tests (tests/test_integration_live.py) are opt-in:
 #   pytest -m integration   (with ALGOCOACH_TEST_COOKIE set)
-addopts = '-m "not integration" --cov=lc --cov=server --cov-report=term-missing'
+# coverage is deliberately NOT in addopts: it used to run on every local
+# pytest and every one of the 9 CI matrix cells while the report was never
+# consumed; CI computes it once on ubuntu/py3.12 with a --cov-fail-under gate
+addopts = '-m "not integration"'
 markers = [
     "integration: tests hitting the real network, run manually",
 ]

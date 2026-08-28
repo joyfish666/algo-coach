@@ -23,15 +23,14 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import re
 import shutil
-import tempfile
 import threading
 from datetime import datetime, timezone
 from html.parser import HTMLParser
 from pathlib import Path
 
+from lc.atomicio import atomic_write_text
 from lc.config import problems_cache_path
 from lc.exceptions import NetworkError, PremiumProblemError
 from lc.i18n import t
@@ -260,11 +259,8 @@ def load_problems(cache_path=None) -> dict:
 
 def save_problems(payload: dict, cache_path=None) -> None:
     path = cache_path_or_default(cache_path)
-    path.parent.mkdir(parents=True, exist_ok=True)
     text = json.dumps(payload, ensure_ascii=False, indent=2)
-    tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(text, encoding="utf-8")
-    tmp.replace(path)
+    atomic_write_text(path, text, newline="")
 
 
 def upsert_summary_into_cache(summary: dict, cache_path=None) -> None:
@@ -540,19 +536,13 @@ def build_cases_payload(detail: dict) -> dict:
 
 
 def _atomic_write_text(path: Path, content: str) -> None:
-    """Temp-file + os.replace, matching the persistence discipline used for
-    problems.json / config.toml. A bare write_text let a concurrent reader
-    (or a crash mid-write) observe a half-flushed workspace file."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_name = tempfile.mkstemp(dir=str(path.parent), prefix=path.name + ".", suffix=".tmp")
-    tmp_path = Path(tmp_name)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8", newline="") as fh:
-            fh.write(content)
-        os.replace(tmp_path, path)
-    finally:
-        if tmp_path.exists():
-            tmp_path.unlink()
+    """Shared persistence primitive (tmp + os.replace with Windows retry).
+
+    A bare write_text let a concurrent reader (or a crash mid-write) observe
+    a half-flushed workspace file; the implementation lives in lc.atomicio
+    so problems.json, config.toml, favorites.json and workspace files share
+    one rename-retry policy instead of four drifting copies."""
+    atomic_write_text(path, content, newline="")
 
 
 def _write_regenerable(path: Path, content: str) -> None:
@@ -708,20 +698,55 @@ def available_languages(directory: Path) -> list:
     return found
 
 
+def _read_text_or_empty(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError:
+        # same degrade-to-empty policy as the cases.json / notes reads in
+        # this function: on Windows a transient sharing violation (editor,
+        # indexer or backup tool holding the file) used to turn a plain GET
+        # of an open problem into a 500
+        return ""
+
+
 def read_problem_state(directory: Path, default_language: str = DEFAULT_LANGUAGE) -> dict:
-    statement = ""
+    """Workspace state for the workbench, resuming at the last-used language.
+
+    The language reported is the most recently written solution.* - not the
+    config default. The config default made every reopen land in a blank
+    editor for a language the user may never have picked: their python3 work
+    stayed on disk, but nothing on either side remembered that python3 was
+    the language in use, and the only remedy was reselecting it by hand.
+    Solution mtime is the natural memory: template fetches and pre-judge
+    saves both touch exactly the file of the language last in play.
+    """
     statement_path = directory / "statement.md"
-    if statement_path.exists():
-        statement = statement_path.read_text(encoding="utf-8")
-    code = ""
-    default_ext = extension_for(default_language)
-    solution_path = directory / f"solution{default_ext}" if default_ext else None
-    if solution_path is not None and solution_path.exists():
-        code = solution_path.read_text(encoding="utf-8")
-    testcases = ""
+    statement = (
+        _read_text_or_empty(statement_path) if statement_path.exists() else ""
+    )
+
+    reverse = {ext: slug for slug, ext in LANGUAGE_REGISTRY.items()}
+    language = default_language
+    latest_path = None
+    latest_mtime = -1.0
+    for path in sorted(Path(directory).glob("solution.*")):
+        if reverse.get(path.suffix) is None:
+            continue
+        try:
+            mtime = path.stat().st_mtime
+        except OSError:
+            continue
+        if mtime > latest_mtime:
+            language = reverse[path.suffix]
+            latest_path = path
+            latest_mtime = mtime
+
+    code = _read_text_or_empty(latest_path) if latest_path is not None else ""
+
     testcases_path = directory / "testcases.txt"
-    if testcases_path.exists():
-        testcases = testcases_path.read_text(encoding="utf-8")
+    testcases = (
+        _read_text_or_empty(testcases_path) if testcases_path.exists() else ""
+    )
     cases = []
     cases_path = directory / "cases.json"
     if cases_path.exists():
@@ -729,17 +754,14 @@ def read_problem_state(directory: Path, default_language: str = DEFAULT_LANGUAGE
             cases = json.loads(cases_path.read_text(encoding="utf-8")).get("cases", [])
         except (json.JSONDecodeError, OSError):
             cases = []
-    solution_mtime = 0.0
-    if solution_path is not None and solution_path.exists():
-        solution_mtime = solution_path.stat().st_mtime
     return {
         "statement_markdown": statement,
         "code": code,
-        "language": default_language,
+        "language": language,
         "languages_available": available_languages(directory),
         "testcases": testcases,
         "cases": cases,
-        "solution_mtime": solution_mtime,
+        "solution_mtime": latest_mtime if latest_path is not None else 0.0,
         "notes": read_notes(directory),
     }
 

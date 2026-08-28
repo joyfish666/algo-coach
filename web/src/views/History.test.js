@@ -86,8 +86,23 @@ describe('History view', () => {
 
   it('shows an explicit empty state when nothing is archived yet', async () => {
     apiMocks.archiveRecent.mockResolvedValue({ records: [] })
+    useI18nStore().set('zh')
     const wrapper = await mountHistory()
     expect(wrapper.find('[data-testid="history-empty"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('还没有提交记录')
+  })
+
+  it('distinguishes an empty filter result from an empty archive', async () => {
+    // one shared message claimed "no submissions yet" when a filter merely
+    // matched nothing, making users doubt the filter had applied
+    apiMocks.archiveRecent.mockResolvedValue({ records: [] })
+    useI18nStore().set('zh')
+    const wrapper = await mountHistory()
+    await wrapper.find('[data-testid="history-qid-input"]').setValue('two-sum')
+    await wrapper.find('[data-testid="history-apply"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('没有符合该筛选条件的提交记录')
+    expect(wrapper.text()).not.toContain('还没有提交记录')
   })
 
   it('exposes failing outputs in an expandable detail', async () => {

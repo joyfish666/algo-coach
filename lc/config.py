@@ -9,10 +9,12 @@ outside any repo under the user home directory.
 
 from __future__ import annotations
 
+import contextlib
 import os
-import stat
-import tempfile
+import threading
 from pathlib import Path
+
+from lc.atomicio import atomic_write_text
 
 try:
     import tomllib as _toml_reader
@@ -40,6 +42,22 @@ DEFAULTS = {
     "default_language": "cpp",
     "request_interval": 2.0,
     "workspace_root": "",
+}
+
+# Politeness bounds for the leetcode.cn rate limiter: below 0.5s the pacing
+# gate is effectively off (risking site-side throttling/bans), above 60s a
+# full sync would take hours; the LLM timeout must stay inside [5, 600] so a
+# typo cannot hang or instantly fail every AI call. These live here - not in
+# the settings API - because env overrides and CLI flows write the same keys
+# through a different door and used to bypass the range policy entirely.
+REQUEST_INTERVAL_MIN = 0.5
+REQUEST_INTERVAL_MAX = 60.0
+LLM_TIMEOUT_MIN = 5.0
+LLM_TIMEOUT_MAX = 600.0
+
+RANGE_LIMITS = {
+    "request_interval": (REQUEST_INTERVAL_MIN, REQUEST_INTERVAL_MAX),
+    "llm_timeout": (LLM_TIMEOUT_MIN, LLM_TIMEOUT_MAX),
 }
 
 # Note on UI preferences (theme / interface language): they are browser-side
@@ -216,6 +234,22 @@ def parse_toml(text: str) -> dict:
     return parse_simple_toml(text)
 
 
+# Single arbiter for config.toml mutations. Several agents rewrite the whole
+# file (settings API save, cookie-rotation persist, data wipe) and each used
+# to guard only its own window with a caller-local lock - so a settings save
+# could be reverted by a rotation snapshot, and the wipe could race a persist
+# into resurrecting the erased cookie. The mutex lives here, next to the file
+# it protects; whole-file RMW sequences must hold update_lock().
+_CONFIG_LOCK = threading.RLock()
+
+
+@contextlib.contextmanager
+def update_lock():
+    """Hold across a load→mutate→save sequence to make it atomic."""
+    with _CONFIG_LOCK:
+        yield
+
+
 def load(path=None) -> dict:
     path = Path(path) if path is not None else config_path()
     merged = dict(DEFAULTS)
@@ -231,21 +265,14 @@ def load(path=None) -> dict:
 
 def save(config: dict, path=None) -> None:
     path = Path(path) if path is not None else config_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
     payload = dict(DEFAULTS)
     payload.update({k: v for k, v in config.items()})
     payload["schema_version"] = SCHEMA_VERSION
-    fd, tmp_name = tempfile.mkstemp(dir=str(path.parent), prefix=path.name + ".", suffix=".tmp")
-    tmp_path = Path(tmp_name)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
-            fh.write(dump_toml(payload))
-        if os.name == "posix":
-            os.chmod(tmp_path, stat.S_IRUSR | stat.S_IWUSR)
-        os.replace(tmp_path, path)
-    finally:
-        if tmp_path.exists():
-            tmp_path.unlink()
+    # atomic_write_text serializes the swap under _CONFIG_LOCK and keeps the
+    # owner-only tmp permissions (mkstemp) through the rename, which replaces
+    # the previous explicit POSIX chmod
+    with _CONFIG_LOCK:
+        atomic_write_text(path, dump_toml(payload))
 
 
 def effective_config(cli_overrides=None, path=None, environ=None) -> dict:
@@ -284,19 +311,28 @@ def validate_environment(environ=None) -> None:
     Without this, one malformed value (e.g. ALGOCOACH_REQUEST_INTERVAL=abc)
     exploded as a ValueError inside effective_config() on every endpoint -
     including the settings API the operator would need to fix it. Called
-    once at startup so misconfiguration fails loudly at the door.
+    once at startup so misconfiguration fails loudly at the door. Range
+    bounds are enforced here too: the env path used to skip the policy the
+    settings API applies, so ALGOCOACH_REQUEST_INTERVAL=0.01 silently
+    disabled the pacing gate it exists to enforce.
     """
     environ = os.environ if environ is None else environ
     for key, env_name in ENV_OVERRIDES.items():
         raw = environ.get(env_name)
         if raw:
             try:
-                _coerce(key, raw)
+                value = _coerce(key, raw)
             except (TypeError, ValueError) as exc:
                 raise ValueError(
                     f"environment variable {env_name}={raw!r} is not a valid "
                     f"value for {key}: {exc}"
                 ) from None
+            bounds = RANGE_LIMITS.get(key)
+            if bounds and not bounds[0] <= value <= bounds[1]:
+                raise ValueError(
+                    f"environment variable {env_name}={raw!r} is out of range "
+                    f"[{bounds[0]}, {bounds[1]}] for {key}"
+                )
 
 
 def _migrate(data: dict) -> dict:

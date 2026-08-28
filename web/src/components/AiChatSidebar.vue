@@ -3,6 +3,7 @@ import { nextTick, onBeforeUnmount, ref, watch } from 'vue'
 
 import { api } from '../api'
 import { useI18nStore } from '../stores/i18n'
+import { useStatusStore } from '../stores/status'
 
 const props = defineProps({
   qid: { type: String, required: true },
@@ -12,6 +13,14 @@ const props = defineProps({
 })
 
 const i18n = useI18nStore()
+// LLM availability comes from /api/status so the panel can guide the user to
+// Settings BEFORE a send fails: the workbench used to be the one LLM surface
+// without a not-configured gate (analytics had one)
+const status = useStatusStore()
+
+if (!status.loaded) {
+  status.refresh()
+}
 
 const POS_KEY = 'algocoach-ai-pos'
 
@@ -141,7 +150,7 @@ function scrollToEnd() {
 
 async function send() {
   const question = draft.value.trim()
-  if (!question || pending.value) return
+  if (!question || pending.value || !status.llmConfigured) return
   const askedQid = props.qid
   draft.value = ''
   messages.value.push({ role: 'user', content: question })
@@ -216,6 +225,11 @@ function onEnter(event) {
     </header>
     <p class="context-hint">{{ i18n.t('ai_context_hint') }}</p>
 
+    <div v-if="!status.llmConfigured" class="llm-hint" data-testid="ai-not-configured">
+      <span>{{ i18n.t('ai_not_configured_hint') }}</span>
+      <RouterLink class="llm-hint-link" to="/settings">{{ i18n.t('nav_settings') }}</RouterLink>
+    </div>
+
     <label v-if="getCode" class="attach-row" data-testid="attach-code">
       <input v-model="attachCode" type="checkbox" />
       <span>{{ i18n.t('attach_code') }}</span>
@@ -246,7 +260,8 @@ function onEnter(event) {
       <button
         class="btn btn-primary btn-sm"
         type="button"
-        :disabled="pending || !draft.trim()"
+        :disabled="pending || !draft.trim() || !status.llmConfigured"
+        data-testid="ai-send"
         @click="send"
       >
         {{ i18n.t('ai_send') }}
@@ -354,6 +369,24 @@ function onEnter(event) {
   color: var(--gray-neutral);
   font-size: var(--font-size-caption);
   margin: var(--space-1) 0 0;
+}
+
+.llm-hint {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-card);
+  color: var(--text-primary);
+  display: flex;
+  flex-direction: column;
+  font-size: var(--font-size-caption);
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+  padding: var(--space-3);
+}
+
+.llm-hint-link {
+  color: var(--accent);
+  font-weight: 600;
 }
 
 .attach-row {

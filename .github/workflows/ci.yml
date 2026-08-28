@@ -14,7 +14,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: pip install ruff
+      # pinned floor matches the dev extra: an unpinned ruff let a new
+      # release break `ruff check .` independently of any code change
+      - run: pip install "ruff>=0.4"
       - run: ruff check .
 
   pytest:
@@ -24,17 +26,28 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        # 3.10/3.11 exercise the no-tomllib fallback parser path that 3.12+ never takes
+        # 3.10 is the only version without stdlib tomllib (added in 3.11);
+        # it alone exercises the fallback TOML parser path in lc/config.py
         python: ['3.10', '3.11', '3.12']
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
       - name: Install package
         run: pip install -e ".[dev]"
       - name: Run tests (integration excluded by default)
         run: pytest
+        if: matrix.os != 'ubuntu-latest' || matrix.python != '3.12'
+      # coverage is computed (and gated) once instead of on every matrix cell;
+      # a --cov-fail-under regression fails CI like any other broken build
+      - name: Run tests with coverage gate
+        run: >
+          pytest --cov=lc --cov=server --cov-report=term-missing
+          --cov-fail-under=80
+        if: matrix.os == 'ubuntu-latest' && matrix.python == '3.12'
 
   web:
     name: web build & test
@@ -59,3 +72,46 @@ jobs:
         run: npm run build
       - name: Unit tests
         run: npx vitest run
+
+  package:
+    name: wheel ships the frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      # the wheel packages server/webdist as package data; building it here
+      # closes the gap where a maintainer skipped the manual copy step and
+      # shipped a UI-less wheel that nothing detected
+      - name: Build frontend into server/webdist
+        run: npm run dist
+        working-directory: web
+      - name: Build wheel
+        run: |
+          pip install build
+          python -m build --wheel
+      - name: Assert the wheel contains the built frontend
+        run: |
+          python - <<'PY'
+          import glob
+          import zipfile
+
+          wheels = glob.glob("dist/*.whl")
+          assert wheels, "no wheel produced"
+          with zipfile.ZipFile(wheels[0]) as zf:
+              names = zf.namelist()
+          shipped = [n for n in names if "/webdist/" in n]
+          assert any(n.endswith("server/webdist/index.html") for n in names), (
+              "server/webdist/index.html missing from wheel - the packaged app "
+              "would boot API-only"
+          )
+          print(f"wheel ships the frontend: {len(shipped)} files")
+          PY

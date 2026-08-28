@@ -116,3 +116,24 @@ def test_chat_network_failure_translated(monkeypatch):
     client = LLMClient(base_url="https://api.x.com/v1", api_key="k", timeout=5)
     with pytest.raises(NetworkError):
         client.chat([])
+
+
+def test_chat_null_content_is_error_not_literal_none(capture_post):
+    """Reasoning-style endpoints answer with content:null; str(None) used to
+    surface the literal string "None" as the coach's reply with a 200."""
+    capture_post["response"] = FakeLLMResponse(200, {"choices": [{"message": {"content": None}}]})
+    client = LLMClient(base_url="https://api.x.com/v1", api_key="k", timeout=5)
+    with pytest.raises(NetworkError) as exc_info:
+        client.chat([])
+    assert "None" not in str(exc_info.value)
+
+
+def test_chat_null_content_falls_back_to_reasoning_content(capture_post):
+    """max_tokens-limited probes against thinking models can spend all tokens
+    in reasoning_content; the connection test used to fail on those."""
+    capture_post["response"] = FakeLLMResponse(
+        200,
+        {"choices": [{"message": {"content": None, "reasoning_content": " 推理过程 "}}]},
+    )
+    client = LLMClient(base_url="https://api.x.com/v1", api_key="k", timeout=5)
+    assert client.chat([]) == "推理过程"
