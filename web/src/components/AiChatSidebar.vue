@@ -1,5 +1,6 @@
 <script setup>
 import { nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import MarkdownIt from 'markdown-it'
 
 import { api } from '../api'
 import { useI18nStore } from '../stores/i18n'
@@ -21,6 +22,12 @@ const status = useStatusStore()
 if (!status.loaded) {
   status.refresh()
 }
+
+// Every OpenAI-compatible model replies in Markdown (bold, lists, code
+// fences) - plain-text interpolation leaked the markers into the chat as
+// literal "**". html:false escapes whatever the model emits, same posture as
+// the analytics report renderer; breaks:true suits chat-style line wrapping.
+const md = new MarkdownIt({ html: false, linkify: false, breaks: true })
 
 const POS_KEY = 'algocoach-ai-pos'
 
@@ -171,7 +178,12 @@ async function send() {
       lang: null,
     })
     if (askedQid !== props.qid) return // user switched problems meanwhile
-    messages.value.push({ role: 'assistant', content: data.answer })
+    // content stays raw for the LLM history; html is the rendered form
+    messages.value.push({
+      role: 'assistant',
+      content: data.answer,
+      html: md.render(data.answer),
+    })
   } catch (err) {
     if (askedQid !== props.qid) return
     const message =
@@ -243,7 +255,10 @@ function onEnter(event) {
         class="bubble"
         :class="[message.role, { error: message.error }]"
       >
-        {{ message.content }}
+        <!-- assistant replies carry rendered markdown (html:false-escaped);
+             user drafts and error notices stay verbatim text -->
+        <div v-if="message.html" class="md" v-html="message.html"></div>
+        <template v-else>{{ message.content }}</template>
       </div>
       <div v-if="pending" class="bubble assistant pending">…</div>
     </div>
@@ -441,6 +456,53 @@ function onEnter(event) {
 .bubble.pending {
   animation: pulse 1s infinite;
   color: var(--gray-neutral);
+}
+
+/* rendered markdown must not inherit the plain-text pre-wrap (block-level
+   elements would gain phantom whitespace between tags) */
+.bubble .md {
+  white-space: normal;
+}
+
+.md :deep(p),
+.md :deep(ul),
+.md :deep(ol) {
+  margin: var(--space-2) 0;
+}
+
+.md :deep(p:first-child),
+.md :deep(ul:first-child),
+.md :deep(ol:first-child),
+.md :deep(pre:first-child) {
+  margin-top: 0;
+}
+
+.md :deep(p:last-child),
+.md :deep(ul:last-child),
+.md :deep(ol:last-child),
+.md :deep(pre:last-child) {
+  margin-bottom: 0;
+}
+
+.md :deep(ul),
+.md :deep(ol) {
+  padding-left: var(--space-6);
+}
+
+.md :deep(pre) {
+  background: var(--bg-secondary);
+  border-radius: var(--radius-card);
+  overflow-x: auto;
+  padding: var(--space-3);
+}
+
+.md :deep(code) {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: var(--font-size-caption);
+}
+
+.md :deep(pre code) {
+  font-size: inherit;
 }
 
 @keyframes pulse {

@@ -181,4 +181,28 @@ describe('ai chat sidebar', () => {
     expect(askMock).not.toHaveBeenCalled()
     wrapper.unmount()
   })
+
+  it('renders assistant replies as markdown but keeps user text verbatim', async () => {
+    // LLM output IS markdown: plain-text interpolation leaked "**bold**"
+    // markers into the chat (the analytics report already rendered - the chat
+    // bubble was the inconsistent surface)
+    askMock.mockResolvedValue({ answer: '先想**思路**：\n\n- 哈希表' })
+    const wrapper = mountPanel()
+    await wrapper.find('[data-testid="ai-open"]').trigger('click')
+
+    await wrapper.find('textarea').setValue('my **draft** stays')
+    await wrapper.find('[data-testid="ai-send"]').trigger('click')
+    await flushPromises()
+
+    const bubbles = wrapper.findAll('.bubble')
+    expect(bubbles).toHaveLength(2)
+    expect(bubbles[1].find('.md strong').exists()).toBe(true)
+    expect(bubbles[1].text()).not.toContain('**')
+    expect(bubbles[1].find('.md li').text()).toBe('哈希表')
+    // the user's own draft is not markdown-rendered
+    expect(bubbles[0].text()).toContain('**')
+    // history fed back to the LLM keeps the raw markdown text, not the html
+    expect(askMock.mock.calls[0][0].question).toBe('my **draft** stays')
+    wrapper.unmount()
+  })
 })
