@@ -39,6 +39,10 @@ from lc.logutil import logger
 
 CACHE_SCHEMA_VERSION = 1
 PAGE_SIZE = 100
+# statement.md is regenerable program output of the converter below; a change
+# in its output shape bumps this and open_problem lazily regenerates stored
+# files (online) so existing workspaces heal without user action
+STATEMENT_VERSION = 2
 
 _UNSUPPORTED_CATEGORY_MARKERS = ("database", "sql", "shell", "concurrency", "pandas")
 
@@ -53,6 +57,14 @@ class _HTMLToMarkdown(HTMLParser):
     _HEADINGS = {"h1": "# ", "h2": "## ", "h3": "### ", "h4": "#### ", "h5": "##### ", "h6": "###### "}
     _BLOCK_END = {"p", "div", "blockquote"} | set(_HEADINGS)
 
+    # Sentence-level punctuation that cn statements put INSIDE a bold segment
+    # right before more text ("**进阶：**你可以想出…"). CommonMark's flanking
+    # rules refuse to close a delimiter run preceded by punctuation and
+    # followed by a letter, so those markers would leak into the rendered
+    # page as literal "**". The punctuation is moved outside the markers -
+    # a purely cosmetic boundary shift (the characters are unchanged).
+    _TRAIL_PUNCT = set("：:，,、。．；;！!？?")
+
     def __init__(self):
         super().__init__(convert_charrefs=True)
         self.blocks = []
@@ -63,12 +75,21 @@ class _HTMLToMarkdown(HTMLParser):
         self.pre_lines = None
         self.pre_language = ""
         self.link_stack = []
+        # buf indices of the currently-open bold/italic markers; closing
+        # rebuilds the whole wrapped segment so emphasis markers stay
+        # CommonMark-renderable instead of being concatenated blindly
+        self.bold_stack = []
+        self.em_stack = []
 
     def flush_block(self):
         text = "".join(self.buf).strip()
         if text:
             self.blocks.append(self.pending_prefix + text)
         self.buf = []
+        # markers never span blocks; a malformed open would otherwise leak a
+        # stale buf index into the next paragraph
+        self.bold_stack.clear()
+        self.em_stack.clear()
         self.pending_prefix = ""
 
     @staticmethod
@@ -77,6 +98,45 @@ class _HTMLToMarkdown(HTMLParser):
             if key == name:
                 return value or ""
         return ""
+
+    def _close_wrap(self, stack, marker):
+        """Close a bold/italic segment as CommonMark-renderable markdown.
+
+        Concatenating markers blindly produced literal "**" garbage on cn
+        statements: trailing whitespace inside the wrap ("**和为目标值 **"
+        - the closer is no longer right-flanking), sentence punctuation
+        before the closer ("**进阶：**你" - flanking rules refuse to close
+        a run preceded by punctuation and followed by a letter), and empty
+        wraps. The wrapped segment is rebuilt with those normalized:
+        whitespace/punctuation move outside the markers, characters are
+        unchanged.
+        """
+        start = stack.pop() if stack else None
+        if start is None or start >= len(self.buf):
+            return  # close without a matching open in this block
+        inner = "".join(self.buf[start + 1:])
+        del self.buf[start:]
+        self.buf.extend(self._balanced_wrap(inner, marker))
+
+    def _balanced_wrap(self, inner, marker):
+        lead = inner[: len(inner) - len(inner.lstrip())]
+        trail = inner[len(inner.rstrip()):]
+        core = inner.strip()
+        if not core:
+            return [lead, trail]
+        moved = ""
+        while core and core[-1] in self._TRAIL_PUNCT:
+            moved = core[-1] + moved
+            core = core[:-1]
+        if not core:
+            # the whole segment was punctuation ("**：**"): nothing to wrap
+            return [lead, moved, trail]
+        pieces = [lead, marker, core, marker, moved, trail]
+        if not lead and self.buf and self.buf[-1].endswith("*"):
+            # two wrapped segments glued together ("**a***b*") form an
+            # ambiguous delimiter run; a separator keeps both renderable
+            pieces.insert(0, " ")
+        return pieces
 
     def handle_starttag(self, tag, attrs):
         if tag == "pre":
@@ -91,6 +151,14 @@ class _HTMLToMarkdown(HTMLParser):
             match = re.search(r"language-([\w+#-]+)", classes)
             if match:
                 self.pre_language = match.group(1)
+            return
+        if self.pre_lines is not None:
+            # inside a fenced block every tag is literal content: cn wraps the
+            # 输入：/输出： labels in <strong>, and emitting markers for them
+            # appended to the PARAGRAPH buffer (not pre_lines), resurfacing as
+            # "************" runs in front of the next heading
+            if tag == "br":
+                self.pre_lines.append("\n")
             return
         if tag == "br":
             self.buf.append("\n")
@@ -113,9 +181,11 @@ class _HTMLToMarkdown(HTMLParser):
             self.pending_prefix = self._HEADINGS[tag]
             return
         if tag in ("strong", "b"):
+            self.bold_stack.append(len(self.buf))
             self.buf.append("**")
             return
         if tag in ("em", "i"):
+            self.em_stack.append(len(self.buf))
             self.buf.append("*")
             return
         if tag == "code" and self.pre_lines is None:
@@ -145,6 +215,10 @@ class _HTMLToMarkdown(HTMLParser):
             return
 
     def handle_endtag(self, tag):
+        if self.pre_lines is not None and tag != "pre":
+            # literal content inside a fence (see handle_starttag): the
+            # closing </strong> of "输出：" must not emit a marker here
+            return
         if tag == "pre":
             code = "".join(self.pre_lines).strip("\n")
             fence = f"```{self.pre_language}" if self.pre_language else "```"
@@ -153,10 +227,10 @@ class _HTMLToMarkdown(HTMLParser):
             self.pre_language = ""
             return
         if tag in ("strong", "b"):
-            self.buf.append("**")
+            self._close_wrap(self.bold_stack, "**")
             return
         if tag in ("em", "i"):
-            self.buf.append("*")
+            self._close_wrap(self.em_stack, "*")
             return
         if tag == "code" and self.pre_lines is None:
             self.buf.append("`")
@@ -570,6 +644,24 @@ def snippets_by_lang(detail: dict) -> dict:
     return {snippet["lang_slug"]: snippet["code"] for snippet in detail.get("code_snippets", [])}
 
 
+def statement_up_to_date(directory: Path) -> bool:
+    return load_meta(directory).get("statement_version") == STATEMENT_VERSION
+
+
+def regenerate_statement(directory: Path, detail: dict) -> None:
+    """Re-generate statement.md from freshly fetched detail.
+
+    Used when a stored workspace was materialized by an older converter
+    (meta.json carries no/older statement_version): statement.md is
+    regenerable program output, so it is overwritten directly while
+    user-owned files stay untouched.
+    """
+    meta = load_meta(directory)
+    _write_regenerable(directory / "statement.md", html_to_markdown(detail.get("statement_html", "")))
+    meta["statement_version"] = STATEMENT_VERSION
+    save_meta(directory, meta)
+
+
 def open_problem(detail: dict, workspace_root=None, default_language: str = DEFAULT_LANGUAGE) -> Path:
     directory = problem_dir_for(detail, workspace_root)
     directory.mkdir(parents=True, exist_ok=True)
@@ -588,6 +680,7 @@ def open_problem(detail: dict, workspace_root=None, default_language: str = DEFA
     internal_id = str(detail.get("internal_question_id", "") or "")
     if internal_id:
         meta["internal_question_id"] = internal_id
+    meta["statement_version"] = STATEMENT_VERSION
 
     lang_snippets = snippets_by_lang(detail)
     template_code = lang_snippets.get(default_language)
@@ -628,6 +721,7 @@ def refresh_problem(directory: Path, detail: dict, default_language: str = DEFAU
         ):
             backups.append(f"solution{ext}")
 
+    meta["statement_version"] = STATEMENT_VERSION
     save_meta(directory, meta)
     return {"backups": backups}
 

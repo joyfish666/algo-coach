@@ -436,3 +436,44 @@ def test_save_testcases_updates_file(tmp_path, detail_fixture):
     directory = problems.open_problem(detail_fixture, tmp_path)
     problems.save_testcases(directory, "custom input line")
     assert (directory / "testcases.txt").read_text(encoding="utf-8") == "custom input line"
+
+
+def test_html_strong_inside_pre_stays_literal():
+    """cn wraps the 输入：/输出： labels in <strong> inside <pre>. Emitting
+    markers for them appended to the PARAGRAPH buffer (not the fence lines)
+    and resurfaced as "************" runs before the next heading."""
+    html = (
+        "<p><strong>示例 1：</strong></p>"
+        "<pre><strong>输入：</strong>nums = [2,7,11,15]\n<strong>输出：</strong>[0,1]</pre>"
+        "<p><strong>示例 2：</strong></p>"
+    )
+    md = problems.html_to_markdown(html)
+    assert "********" not in md
+    fence = md.split("```")[1]
+    assert "输入：nums = [2,7,11,15]" in fence
+    assert "**" not in fence
+    assert "**示例 2**：" in md
+
+
+def test_html_strong_trailing_cjk_punctuation_stays_renderable():
+    """CommonMark flanking rules refuse to close "**进阶：**你" (punctuation
+    before the closer, letter after) - the markers used to leak as literal
+    "**" in the rendered statement. Punctuation moves outside the markers."""
+    html = "<p><strong>进阶：</strong>你可以想出更快的算法吗？</p>"
+    md = problems.html_to_markdown(html)
+    assert md.strip() == "**进阶**：你可以想出更快的算法吗？"
+
+
+def test_html_strong_inner_whitespace_moved_outside():
+    html = "<p><strong>和为目标值 </strong><em><code>target</code></em></p>"
+    md = problems.html_to_markdown(html)
+    # trailing space inside the wrap broke the closer; it moves outside, and
+    # the whitespace keeps the two adjacent runs unambiguous
+    assert md.strip() == "**和为目标值** *`target`*"
+
+
+def test_html_empty_strong_dropped():
+    html = "<p>a<strong></strong>b</p>"
+    md = problems.html_to_markdown(html)
+    assert "****" not in md
+    assert "ab" in md

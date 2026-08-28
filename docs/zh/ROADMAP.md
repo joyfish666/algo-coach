@@ -141,6 +141,10 @@
 | 测试 | 打包契约零验证：vite 产物 web/dist → server/webdist 的拷贝只存在于 DEVELOPMENT.md 的 POSIX shell 片段里，漏拷会发出 UI-less wheel 且无任何环节能发现 | 契约只写在文档里 → `npm run dist`（跨平台 copy 脚本）+ CI 新增 package job：构建后 `python -m build` 并断言 wheel 内含 `server/webdist/index.html` |
 | 测试 | 覆盖率纯装饰：`--cov` 在 addopts 里 9 个 CI 矩阵格各算一遍且从无门槛无消费；CI 注释错误声称 3.10/3.11 都走 TOML 回退解析（tomllib 3.11 已内置，只有 3.10 走回退）；ruff 未锁版本；pytest 矩阵无 pip 缓存；test_cli_guard 有一处恒真断言 | 覆盖率加在没人看的位置 → 移出 addopts，CI 单格 `--cov-fail-under=80`（当前 87%）；其余逐项修正 |
 | 文档 | 本批全部改动同步进 USAGE / ARCHITECTURE / DEVELOPMENT / PITFALLS（新增 7 条坑）与双语 README | 文档随实现同步是仓库既定规则 |
+| Bug | 题面渲染大面积损坏：每个示例块前出现 `************` 星号串、`**进阶：**你` 等处粗体标记漏出（用户实测 two-sum 报告） | 两个根因：① cn 站把「输入：/输出：/解释：」以 `<strong>` 包在 `<pre>` 里，转换器对围栏内行内标签照常发射 `**` 且写进段落缓冲区而非围栏行（3 对标签 = 12 个星号拼到下一段）；② CommonMark flanking 规则对 CJK 不友好——闭合 `**` 前是标点后是汉字（`**进阶：**你`）或空格在粗体内部（`**和为目标值 **`）都拒绝闭合，标记原样漏出 → 转换器对围栏内标签一律按纯文本；强调段改为「栈式重建发射」：收尾空白/句级标点移到标记外侧、空标记丢弃、相邻包裹段补分隔（已用真实 HTML 结构 + markdown-it 渲染验证零星号泄漏） |
+| 功能 | 旧版转换器生成的损坏 statement.md 无法自愈 | statement.md 是「转换器版本化的可再生文件」却无版本标记 → meta.json 记录 `statement_version`，打开题目时版本落后则在线重生成一次（离线/站点失败降级用旧文件，断网复习不受影响），存量工作区自动修复 |
+| 文档 | PITFALLS 存在两个内容漂移的重复「前端与服务」章节（并集合并为一份） | 历史批次往不同副本各追加了条目，且从未去重 |
+
 
 ### 登记【延】
 

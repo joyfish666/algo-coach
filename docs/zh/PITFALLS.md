@@ -71,6 +71,24 @@
 - **释放锁必须核对归属**：无条件 unlink 会在「崩溃接管」场景删掉*继任者*的锁，
   重新打开双实例窗口。只有 payload 记录的 pid 是自己才删除。
 
+## 题面转换（HTML → Markdown）
+
+- **`<pre>` 内的行内标签必须当纯文本**（2026-08-28 已修复，两根因之一）：cn 站把示例块的
+  「输入：/输出：/解释：」包在 `<strong>` 里放进 `<pre>`。转换器曾对这些标签照常发射
+  `**` 标记——而且写进了段落缓冲区而非围栏行，于是每个示例的 3 对标记（6 个 `**` =
+  12 个星号）拼到下一段开头，渲染成 `************ 示例 2：`。围栏内除 `<pre>`/语言
+  `<code>`/`<br>` 外的一切标签都要忽略。
+- **CommonMark 强调定界符规则对 CJK 不友好**（2026-08-28 已修复，另一根因）：
+  `**进阶：**你` 这种「闭合 `**` 前是标点、后是汉字」的组合按 flanking 规则**拒绝闭合**，
+  `**` 原样漏出；`**和为目标值 **`（空格在粗体内部导致闭合侧非右翼）同理。
+  发射强调标记必须保证可渲染：收尾空白/句级标点（：，。等）移到标记外侧（纯边界平移，
+  字符不变）、空标记丢弃、相邻包裹段之间补分隔。不要试图在前端修——markdown-it 严格
+  实现 CommonMark，且依赖政策禁止加 CJK 插件，出口只有转换器发射合规的 Markdown。
+- **statement.md 是「转换器版本化的可再生文件」**：`meta.json` 记录
+  `statement_version`，转换器输出形状变化时递增 `lc.problems.STATEMENT_VERSION`；
+  打开题目时版本落后则在线重生成一次（离线/站点失败降级用旧文件，断网复习不受影响）。
+  否则磁盘上已生成的损坏题面永远无法自愈——用户不能被要求手删文件。
+
 ## 前端与服务
 
 - **SPA history 路由刷新 404**：FastAPI 需 catch-all 回退 index.html。
@@ -83,7 +101,22 @@
 - **多标签页同题双编辑**：接受 last-write-wins（localStorage 快照恢复仅覆盖「下次打开」场景）。
 - **前端 i18n 缺键是静默的**：`t()` 找不到键时原样返回 key 字符串，界面会出现「cookie_invalid」
   这类裸键且无报错。新增服务端 `message_key` 或界面文案时，必须确认 zh/en 两份 catalog 都有
-  对应条目（auth 横幅曾因此长期显示裸键）。
+  对应条目（auth 横幅曾因此长期显示裸键）。同一领域概念（如判定文案）禁止两处各自实现映射——
+  History 曾绕过 verdict_* 目录显示原始英文枚举；已收敛到共享 `utils/verdict.js`。
+- **后端 message_key ↔ 前端 catalog 的平价必须有自动化护栏**（2026-08-28 已修复）：
+  `check:i18n` 只能扫描字面 `t('...')`，服务端驱动用法（`i18n.t(keyFromServer)`）全部
+  不可见——后端 15 个 message_key 曾缺 11 个仍全绿，非 zh locale 的后端进程会把英文
+  错误文本直接渲染进中文界面。`tests/test_i18n.py` 的平价测试保证后端 catalog ⊆ 前端
+  两个 locale 块；`check:i18n` 对「提取到 0 键」fail-loud（目录形状重构后正则失效会
+  静默全绿）。另外 `HTTPException(detail=t(key))` 曾整体绕过 message_key 机制——
+  带 i18n 键的 HTTPException 一律走 `http_domain_error()`，前端识别 `detail.message_key`。
+- **Vue watcher 异步 flush 会让「先赋值后改」的守卫失效**（2026-08-28 已修复，最高危）：
+  watcher 回调执行时读到的是整段同步代码跑完后的状态。工作台 `loadProblem` 先赋
+  `problem.value` 再改 `lang.value`，`!problem.value` 守卫在回调时点已失效——挂载/切题
+  被当成「用户切换语言」，把刚加载的代码用旧语言 PUT 覆盖无关题目的文件，再用模板覆写
+  编辑器。程序化赋值（加载/模板应用/切换失败回退）必须用**跨 nextTick 的栅栏标志**抑制
+  watcher，`finally` 里 `await nextTick()` 后才能解除。测试要跨一个 macrotask 断言
+  「未发生 PUT」，只 flushPromises 抓不到异步 flush 的 watcher。
 - **错误文案语言以 UI 语言为准**：服务端错误 payload 只保证 `message_key` 稳定，`message`
   文本跟随后端进程 locale；前端必须在 api 层集中按 message_key 翻译后再展示，
   各视图自行取 `error.message` 会导致中英混杂。
@@ -92,32 +125,45 @@
   失败的错误都永远渲染不出来（被「上次同步」分支短路）。教训：错误必须走独立通知
   通道（现为 toast store，错误驻留至手动关闭），页面内只保留信息性状态行；
   同一插槽内做优先级级联时，错误分支必须排在任何历史状态之前。
-- **空 progress 快照 ≠ 同步完成**：`SyncEngine.progress()` 在「从未运行」与「刚完成」
+**空 progress 快照 ≠ 同步完成**：`SyncEngine.progress()` 在「从未运行」与「刚完成」
   两种状态下都返回 `running:false`，区别仅在 started_at/finished_at 是否有值。
   前端轮询若把一切非 running 一律当完成，后端在同步中途重启（引擎归零）时会向用户
   假报「同步完成」。判定真实完成必须同时检查 `started_at || finished_at`。
-- **致命错误与瞬态错误禁止共用一个状态**：工作台曾用同一个 errorText 承载「题目加载失败」
-  与「保存/判定瞬时失败」，后者会把整个编辑器界面替换成错误卡，用户代码直接从视野消失。
-  根因修复：加载失败才允许整页替换（loadError），操作失败一律走 toast 并保持界面存活。
-- **测试客户端会归一化 URL 点段**：`client.put("/api/problem/../etc/...")` 在到达路由前就被
+**测试客户端会归一化 URL 点段**：`client.put("/api/problem/../etc/...")` 在到达路由前就被
   httpx 折叠成合法路径（得到 404/405 而非守卫的 400），slug 白名单守卫要用「路径合法但
   字符集非法」的载荷测（如 `two.sum`）。（2026-08-24 已验证）
+- **致命/瞬态错误分离是全站约定，不是单页特例**（2026-08-25 补齐 Analyze）：
+  「首次加载失败才允许整页替换；操作失败一律行内/toast 并保持界面存活」。工作台修过一次后
+  分析页仍复发了同类 bug（LLM 生成失败炸掉整页统计），新页面落地时必须主动套用该模式。
+- **跨请求存续的派生状态不得从单次响应重建**：Analyze 的 AI 报告曾每次 reload 都用
+  响应体里的 ai_report（普通刷新恒为 null）覆写本地 HTML——用户刚花 1–2 分钟生成的报告
+  被静默清空。仅在响应真正携带报告时才更新。
+- **IME 组合输入期间 Enter 不是提交意图**：中文输入法确认候选词走 Enter，事件带
+  `isComposing=true`（或 keyCode 229）。所有「Enter 发送/提交」入口必须检查组合态，
+  否则中文用户会不断发出半截拼音。（2026-08-25 已修复 AI 输入框）
+  测试提示：VTU `trigger('keydown', {...})` 不设置 `key` 会被 Vue 的 `.enter` 修饰符过滤、
+  且原型只读属性要用 `Object.defineProperty` 模拟——直接构造 KeyboardEvent 再 dispatch 更可靠。
+- **「清除全部数据」的范围包括浏览器侧**（2026-08-25 已修复）：编辑器草稿快照存在 localStorage，
+  服务端擦除后 `solution_mtime` 归零会让所有快照看起来"更新"，旧代码以恢复条形式复活。
+  擦除动作必须同时清除 `algocoach-snapshot:*`（主题/语言等偏好类保留）。
+- **URL query 是筛选状态的唯一事实源**：列表筛选若只在 query 出现时单向写入，
+  用户手动改回默认值后 URL 与实际过滤态脱钩。query 变化时对它承载的每个键做全量赋值
+  （缺席即重置为默认）。
+- **CodeMirror 默认语法高亮只有浅色调色板**：暗色模式下需自备 HighlightStyle
+  （`@lezer/highlight` 为 CodeMirror 官方包，已列入依赖政策白名单）；容器 chrome 用
+  设计 token 的 CSS 变量即可自动随 `data-theme` 切换。
 - **AbortSignal.timeout 需降级路径**：前端 fetch 统一加截止时间防「后端挂起永不返回」，
   但旧浏览器无该 API——封装处检测其存在性，缺失时退化为无超时而不是整个请求报错。
-- **uvicorn 预绑定 socket 走 `Server.run(sockets=[...])` 而非 `Config(sock=)`**（2026-08-26 已修复）：
-  `uvicorn.Config` 从不接受 `sock` 参数（只有 `fd`），传了会在启动瞬间
-  `TypeError: unexpected keyword argument`——且只在真实启动路径暴露，单测若不真跑
-  `server.run()` 根本抓不到。正确姿势：`uvicorn.Server(config)` 后
-  `server.run(sockets=[sock])`，Config 里的 host/port 此时仅是兜底描述。
-- **思考（thinking）参数没有跨厂商标准**（2026-08-26 落地时的设计约束）：DeepSeek 用
-  独立模型名（deepseek-reasoner）、Qwen/DashScope 用 `enable_thinking`、GLM 用
-  `thinking.type`、OpenAI 系用 `reasoning_effort`——同一语义四套参数，且严格校验的
-  服务商对未知字段直接 400。因此 `llm_thinking` 的非默认档只映射最通用的 OpenAI 兼容
-  约定（`enable_thinking` + `reasoning_effort`），`default` 档**一个额外字段都不发**；
-  新增档位/字段前先想清楚这个兼容性矩阵，并让「测试连接」承担验证职责。
+- **SPA 回退必须区分「深链路径」与「资源路径」**（2026-08-28 已修复）：重新部署后旧标签页
+  引用的哈希 chunk 已不存在，catch-all 把 `/assets/xxx.js` 回写成 index.html——JS 请求收到
+  HTML，路由动态 import 失败且被吞掉，所有导航点击静默失效。资源形态（末段含扩展名）
+  未命中一律 404；router.onError 检测 chunk 失败后整页刷新重新接管。
+- **fetch 的网络层失败要归一化**：除超时（DOMException TimeoutError）外，拒连/断网抛的是
+  `TypeError: Failed to fetch`——不翻译就会把英文浏览器原文渲染进中文界面。
 - **双 coach 实例并存**：由单实例守卫杜绝（绑定失败探测拒启 + instance.lock 锁文件封堵
   「端口顺延后新实例直接绑成功」盲区）；锁仅用于实例互斥而非数据文件加锁。若守卫被绕过仍按
-  jsonl 单次小写入（O_APPEND 级别）接受 last-wins。
+  jsonl 单次小写入（O_APPEND 级别）接受 last-wins；同理，「清除数据瞬间恰有判题在途」时
+  该条结果落进新建归档属可接受的 last-wins，不视为复活 bug。
 
 ## 并发模型
 
@@ -160,75 +206,6 @@
 - **环境变量覆盖必须在启动期校验**（2026-08-25 已修复）：坏值若等到 `effective_config()`
   才爆炸，会让所有接口 500——包括本可用于修复它的 /api/settings。启动时
   `validate_environment()` 一次性校验并指名变量，coach 退出码 2。
-
-## 前端与服务
-
-- **SPA history 路由刷新 404**：FastAPI 需 catch-all 回退 index.html。
-- **打包后 dist 定位**：pip 安装态下 `coach` 必须能定位 web/dist（package data /
-  importlib.resources / 可配置路径），阶段 7 验收包含「安装态正常打开前端页面」。
-- **本机 API 防护**：校验 Origin / Sec-Fetch-Site + Host 头。DNS rebinding 场景下缺失
-  Origin 会穿透；dev 模式 Vite proxy 透传原始 Origin `http://localhost:5173` 必须在白名单；
-  按方法分级——POST/PUT 等 state-changing 方法强制白名单 Origin（同源 fetch POST 也带
-  Origin，不影响正常使用），仅 GET 允许缺失 Origin + Host 校验兜底。
-- **多标签页同题双编辑**：接受 last-write-wins（localStorage 快照恢复仅覆盖「下次打开」场景）。
-- **前端 i18n 缺键是静默的**：`t()` 找不到键时原样返回 key 字符串，界面会出现「cookie_invalid」
-  这类裸键且无报错。新增服务端 `message_key` 或界面文案时，必须确认 zh/en 两份 catalog 都有
-  对应条目（auth 横幅曾因此长期显示裸键）。同一领域概念（如判定文案）禁止两处各自实现映射——
-  History 曾绕过 verdict_* 目录显示原始英文枚举；已收敛到共享 `utils/verdict.js`。
-- **后端 message_key ↔ 前端 catalog 的平价必须有自动化护栏**（2026-08-28 已修复）：
-  `check:i18n` 只能扫描字面 `t('...')`，服务端驱动用法（`i18n.t(keyFromServer)`）全部
-  不可见——后端 15 个 message_key 曾缺 11 个仍全绿，非 zh locale 的后端进程会把英文
-  错误文本直接渲染进中文界面。`tests/test_i18n.py` 的平价测试保证后端 catalog ⊆ 前端
-  两个 locale 块；`check:i18n` 对「提取到 0 键」fail-loud（目录形状重构后正则失效会
-  静默全绿）。另外 `HTTPException(detail=t(key))` 曾整体绕过 message_key 机制——
-  带 i18n 键的 HTTPException 一律走 `http_domain_error()`，前端识别 `detail.message_key`。
-- **Vue watcher 异步 flush 会让「先赋值后改」的守卫失效**（2026-08-28 已修复，最高危）：
-  watcher 回调执行时读到的是整段同步代码跑完后的状态。工作台 `loadProblem` 先赋
-  `problem.value` 再改 `lang.value`，`!problem.value` 守卫在回调时点已失效——挂载/切题
-  被当成「用户切换语言」，把刚加载的代码用旧语言 PUT 覆盖无关题目的文件，再用模板覆写
-  编辑器。程序化赋值（加载/模板应用/切换失败回退）必须用**跨 nextTick 的栅栏标志**抑制
-  watcher，`finally` 里 `await nextTick()` 后才能解除。测试要跨一个 macrotask 断言
-  「未发生 PUT」，只 flushPromises 抓不到异步 flush 的 watcher。
-- **错误文案语言以 UI 语言为准**：服务端错误 payload 只保证 `message_key` 稳定，`message`
-  文本跟随后端进程 locale；前端必须在 api 层集中按 message_key 翻译后再展示，
-  各视图自行取 `error.message` 会导致中英混杂。
-- **信息性行不得遮蔽错误通道**：Problems 页头曾把显示优先级排成
-  `syncing > 成功提示 > 上次同步时间 > 错误文本`——只要成功同步过一次，后续任何同步
-  失败的错误都永远渲染不出来（被「上次同步」分支短路）。教训：错误必须走独立通知
-  通道（现为 toast store，错误驻留至手动关闭），页面内只保留信息性状态行；
-  同一插槽内做优先级级联时，错误分支必须排在任何历史状态之前。
-- **致命/瞬态错误分离是全站约定，不是单页特例**（2026-08-25 补齐 Analyze）：
-  「首次加载失败才允许整页替换；操作失败一律行内/toast 并保持界面存活」。工作台修过一次后
-  分析页仍复发了同类 bug（LLM 生成失败炸掉整页统计），新页面落地时必须主动套用该模式。
-- **跨请求存续的派生状态不得从单次响应重建**：Analyze 的 AI 报告曾每次 reload 都用
-  响应体里的 ai_report（普通刷新恒为 null）覆写本地 HTML——用户刚花 1–2 分钟生成的报告
-  被静默清空。仅在响应真正携带报告时才更新。
-- **IME 组合输入期间 Enter 不是提交意图**：中文输入法确认候选词走 Enter，事件带
-  `isComposing=true`（或 keyCode 229）。所有「Enter 发送/提交」入口必须检查组合态，
-  否则中文用户会不断发出半截拼音。（2026-08-25 已修复 AI 输入框）
-  测试提示：VTU `trigger('keydown', {...})` 不设置 `key` 会被 Vue 的 `.enter` 修饰符过滤、
-  且原型只读属性要用 `Object.defineProperty` 模拟——直接构造 KeyboardEvent 再 dispatch 更可靠。
-- **「清除全部数据」的范围包括浏览器侧**（2026-08-25 已修复）：编辑器草稿快照存在 localStorage，
-  服务端擦除后 `solution_mtime` 归零会让所有快照看起来"更新"，旧代码以恢复条形式复活。
-  擦除动作必须同时清除 `algocoach-snapshot:*`（主题/语言等偏好类保留）。
-- **URL query 是筛选状态的唯一事实源**：列表筛选若只在 query 出现时单向写入，
-  用户手动改回默认值后 URL 与实际过滤态脱钩。query 变化时对它承载的每个键做全量赋值
-  （缺席即重置为默认）。
-- **CodeMirror 默认语法高亮只有浅色调色板**：暗色模式下需自备 HighlightStyle
-  （`@lezer/highlight` 为 CodeMirror 官方包，已列入依赖政策白名单）；容器 chrome 用
-  设计 token 的 CSS 变量即可自动随 `data-theme` 切换。
-- **AbortSignal.timeout 需降级路径**：前端 fetch 统一加截止时间防「后端挂起永不返回」，
-  但旧浏览器无该 API——封装处检测其存在性，缺失时退化为无超时而不是整个请求报错。
-- **SPA 回退必须区分「深链路径」与「资源路径」**（2026-08-28 已修复）：重新部署后旧标签页
-  引用的哈希 chunk 已不存在，catch-all 把 `/assets/xxx.js` 回写成 index.html——JS 请求收到
-  HTML，路由动态 import 失败且被吞掉，所有导航点击静默失效。资源形态（末段含扩展名）
-  未命中一律 404；router.onError 检测 chunk 失败后整页刷新重新接管。
-- **fetch 的网络层失败要归一化**：除超时（DOMException TimeoutError）外，拒连/断网抛的是
-  `TypeError: Failed to fetch`——不翻译就会把英文浏览器原文渲染进中文界面。
-- **双 coach 实例并存**：由单实例守卫杜绝（绑定失败探测拒启 + instance.lock 锁文件封堵
-  「端口顺延后新实例直接绑成功」盲区）；锁仅用于实例互斥而非数据文件加锁。若守卫被绕过仍按
-  jsonl 单次小写入（O_APPEND 级别）接受 last-wins；同理，「清除数据瞬间恰有判题在途」时
-  该条结果落进新建归档属可接受的 last-wins，不视为复活 bug。
 
 ## 已知限制（明示决策，非遗留 bug）
 

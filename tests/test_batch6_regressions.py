@@ -262,9 +262,15 @@ def _write_solution(directory, language, code):
 def test_read_problem_state_resumes_last_used_language(tmp_path):
     """Reopening a problem used to land in the config default's (usually
     empty) editor: neither side remembered which language was last in play."""
+    import os
+
     directory = tmp_path
     _write_solution(directory, "cpp", "// old cpp")
     _write_solution(directory, "python3", "# newest python work")
+    # mtime granularity cannot distinguish two writes in the same clock tick
+    # on some filesystems - pin the "python3 edited last" ordering explicitly
+    os.utime(directory / "solution.cpp", (1000, 1000))
+    os.utime(directory / "solution.py", (2000, 2000))
 
     state = problems.read_problem_state(directory, default_language="cpp")
     assert state["language"] == "python3"

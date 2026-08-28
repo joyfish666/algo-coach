@@ -576,3 +576,53 @@ def test_mask_secret_short_values_stay_fully_masked():
     masked = api_module.mask_secret("y" * 32)
     assert masked.startswith("…")
     assert "yyyy" not in masked[:-1] or masked.endswith("yyyy")
+
+
+def test_open_problem_regenerates_stale_statement_once(client, monkeypatch):
+    """statement.md is converter output; a workspace materialized by an older
+    converter kept rendering literal "**" garbage forever. Opening the problem
+    online now regenerates it exactly once (meta statement_version gate)."""
+    adapter = FakeAdapter(detail=DETAIL_FIXTURE)
+    monkeypatch.setattr(api_module, "create_adapter", lambda: adapter)
+    client.get("/api/problem/two-sum")
+
+    directory = api_module.problems.find_problem_dir(api_module._workspace_root(), "two-sum")
+    meta = api_module.problems.load_meta(directory)
+    meta["statement_version"] = 1
+    api_module.problems.save_meta(directory, meta)
+    (directory / "statement.md").write_text("**旧版**损坏题面", encoding="utf-8")
+
+    second = client.get("/api/problem/two-sum")
+    assert second.status_code == 200
+    detail_calls = [c for c in adapter.calls if c[0] == "detail"]
+    assert len(detail_calls) == 2  # refetched exactly once for the upgrade
+    assert "题面内容" in (directory / "statement.md").read_text(encoding="utf-8")
+    assert api_module.problems.statement_up_to_date(directory)
+
+    client.get("/api/problem/two-sum")
+    detail_calls = [c for c in adapter.calls if c[0] == "detail"]
+    assert len(detail_calls) == 2  # up to date: no further refetch
+
+
+def test_open_problem_keeps_stale_statement_when_offline(client, monkeypatch):
+    """Offline review must keep working: a failed regeneration degrades to
+    the stored file instead of failing the whole open."""
+    from lc.exceptions import NetworkError
+
+    adapter = FakeAdapter(detail=DETAIL_FIXTURE)
+    monkeypatch.setattr(api_module, "create_adapter", lambda: adapter)
+    client.get("/api/problem/two-sum")
+
+    directory = api_module.problems.find_problem_dir(api_module._workspace_root(), "two-sum")
+    meta = api_module.problems.load_meta(directory)
+    meta["statement_version"] = 1
+    api_module.problems.save_meta(directory, meta)
+    (directory / "statement.md").write_text("旧题面", encoding="utf-8")
+
+    def offline(slug):
+        raise NetworkError("no route")
+
+    adapter.fetch_question_detail = offline
+    response = client.get("/api/problem/two-sum")
+    assert response.status_code == 200
+    assert "旧题面" in (directory / "statement.md").read_text(encoding="utf-8")

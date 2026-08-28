@@ -69,6 +69,8 @@ GET  /api/problems/sync/progress    同步进度轮询
 GET  /api/daily                     每日一题
 GET  /api/problem/{qid}             打开题目：本地已落盘则纯读；未落盘时惰性物化
                                     （抓取一次并写入工作区/缓存），此后离线可读；
+                                    statement.md 带转换器版本号（meta.statement_version），
+                                    版本落后时在线重生成一次，失败降级用旧文件；
                                     language 返回最近写入的 solution.*（重开续用
                                     上次语言），无任何 solution 时回退配置默认语言
 POST /api/problem/{qid}/refresh     显式重抓题目详情并刷新工作区（用户编辑过的文件先 .bak 备份）

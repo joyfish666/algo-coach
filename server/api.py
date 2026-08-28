@@ -551,6 +551,22 @@ def _open_or_refresh(slug: str, refresh: bool) -> dict:
     if directory is None:
         raise http_domain_error(404, "problem_not_found")
 
+    if not need_fetch and not problems.statement_up_to_date(directory):
+        # statement.md is regenerable converter output; a stored workspace
+        # written by an older converter renders literal "**" garbage, so it
+        # is refreshed once from the site. Offline or site-side failure
+        # degrades to the stored file - offline review keeps working.
+        try:
+            detail = adapter.fetch_question_detail(slug)
+            problems.regenerate_statement(directory, detail)
+            logger.info(
+                "regenerated statement.md for %s (converter v%d)",
+                slug,
+                problems.STATEMENT_VERSION,
+            )
+        except (AlgoCoachError, OSError) as exc:
+            logger.warning("statement regeneration skipped for %s: %s", slug, exc)
+
     state = problems.read_problem_state(directory, default_language=_default_lang())
     cache = problems.load_problems()
     row = next((p for p in cache["problems"] if p["slug"] == slug), {})
