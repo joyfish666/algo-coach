@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 
 import { useI18nStore } from '../stores/i18n'
-import { verdictLabel, verdictTone } from '../utils/verdict'
+import { pairCaseOutputs, verdictLabel, verdictTone } from '../utils/verdict'
 
 const props = defineProps({
   verdict: { type: Object, required: true },
@@ -46,14 +46,7 @@ const caseCounts = computed(() => {
 
 const waRows = computed(() => {
   if (statusKey.value !== 'wrong_answer') return []
-  const expected = props.verdict.expected_outputs || []
-  const actual = props.verdict.outputs || []
-  const rows = []
-  const len = Math.max(expected.length, actual.length)
-  for (let i = 0; i < len; i += 1) {
-    rows.push({ expected: expected[i] ?? '—', actual: actual[i] ?? '—' })
-  }
-  return rows
+  return pairCaseOutputs(props.verdict.expected_outputs, props.verdict.outputs)
 })
 
 const compileError = computed(() => (statusKey.value === 'compile_error'

@@ -55,16 +55,16 @@ describe('api error translation', () => {
     expect(err.message).toBe('raw text')
   })
 
-  it('translates message_key carried in structured HTTPException details', async () => {
-    // HTTPException sites (sync conflict, ask-not-configured, 404s) used to
-    // ship backend-locale text with no key; the frontend must translate them
-    // like domain errors
+  it('translates message_key from HTTPException-shaped errors in the one envelope', async () => {
+    // http_domain_error sites (sync conflict, ask-not-configured, 404s)
+    // travel through the same {"error": ...} envelope as domain errors, so
+    // the normalizer needs no shape-specific branches
     useI18nStore().set('zh')
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue(
         errorResponse(409, {
-          detail: { kind: 'HTTPException', message_key: 'sync_in_progress', message: '题库同步正在进行中' },
+          error: { kind: 'HTTPException', message_key: 'sync_in_progress', message: '题库同步正在进行中' },
         })
       )
     )

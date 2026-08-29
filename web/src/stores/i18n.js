@@ -1,8 +1,11 @@
 import { defineStore } from 'pinia'
 
-const STORAGE_KEY = 'algocoach-lang'
+import { STORAGE_KEYS, readStorage, writeStorage } from '../utils/storage'
 
-export const MESSAGES = {
+// module-private catalog: the i18n guard (scripts/check_i18n_keys.mjs) reads
+// this file's source and extracts the keys below at one indent level - keep
+// the zh:/en: blocks in that shape when editing
+const MESSAGES = {
   zh: {
     nav_problems: '题库',
     nav_daily: '每日一题',
@@ -454,11 +457,7 @@ export const MESSAGES = {
 }
 
 function readStoredLang() {
-  try {
-    return localStorage.getItem(STORAGE_KEY)
-  } catch {
-    return null
-  }
+  return readStorage(STORAGE_KEYS.lang)
 }
 
 function detectLocale() {
@@ -495,10 +494,7 @@ export const useI18nStore = defineStore('i18n', {
     set(lang) {
       if (!MESSAGES[lang]) return
       this.lang = lang
-      try {
-        localStorage.setItem(STORAGE_KEY, lang)
-      } catch {
-      }
+      writeStorage(STORAGE_KEYS.lang, lang)
     },
   },
 })

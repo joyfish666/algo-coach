@@ -54,9 +54,12 @@ describe('setup wizard step 1 (cookie)', () => {
   })
 
   it('shows server error and keeps next disabled when validation fails', async () => {
+    // the rejection mirrors what api.js handle() throws: the localized
+    // message lands on err.message, the payload rides along for context
     validateCookieMock.mockRejectedValue({
-      message: 'HTTP 401',
-      payload: { error: { kind: 'AuthError', message_key: 'cookie_invalid', message: 'Cookie 已失效' } },
+      message: 'Cookie 已失效，请重新粘贴',
+      status: 401,
+      payload: { error: { kind: 'AuthError', message_key: 'cookie_invalid', message: 'Cookie 已失效，请重新粘贴' } },
     })
     const wrapper = mountWizard()
     await fillSimpleMode(wrapper)

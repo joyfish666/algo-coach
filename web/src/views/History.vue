@@ -4,7 +4,7 @@ import { onMounted, ref } from 'vue'
 import PageHeader from '../components/PageHeader.vue'
 import { api } from '../api'
 import { useI18nStore } from '../stores/i18n'
-import { verdictLabel, verdictTone } from '../utils/verdict'
+import { pairCaseOutputs, verdictLabel, verdictTone } from '../utils/verdict'
 
 const i18n = useI18nStore()
 
@@ -29,14 +29,7 @@ function statusLabel(statusKey) {
 }
 
 function detailRows(record) {
-  const expected = record.expected_outputs || []
-  const actual = record.outputs || []
-  const len = Math.max(expected.length, actual.length)
-  const rows = []
-  for (let i = 0; i < len; i += 1) {
-    rows.push({ expected: expected[i] ?? '—', actual: actual[i] ?? '—' })
-  }
-  return rows
+  return pairCaseOutputs(record.expected_outputs, record.outputs)
 }
 
 async function loadHistory() {

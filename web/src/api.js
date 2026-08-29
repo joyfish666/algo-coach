@@ -54,13 +54,12 @@ async function handle(response) {
     }
     // single point where server error payloads become user-visible text:
     // prefer the localized message_key so wording follows the UI language
-    // instead of the backend process locale. Domain errors carry it under
-    // error.message_key; HTTPException sites carry it under detail.message_key.
+    // instead of the backend process locale. The backend emits one error
+    // envelope ({"error": {...}}, see server/errors.py); unknown keys fall
+    // back to the raw server message.
     const message =
       translateMessageKey(payload?.error?.message_key) ||
-      translateMessageKey(payload?.detail?.message_key) ||
       (payload && payload.error && payload.error.message) ||
-      (typeof payload?.detail === 'string' ? payload.detail : null) ||
       `HTTP ${response.status}`
     if (debugEnabled.value) {
       debugLog(

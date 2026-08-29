@@ -5,6 +5,8 @@ import { useRouter } from 'vue-router'
 import PageHeader from '../components/PageHeader.vue'
 import ThemeSwitch from '../components/ThemeSwitch.vue'
 import { api } from '../api'
+import { userFacingError } from '../utils/errors'
+import { LANGUAGE_OPTIONS } from '../utils/languages'
 import { useI18nStore } from '../stores/i18n'
 import { useStatusStore } from '../stores/status'
 
@@ -27,13 +29,10 @@ const finishing = ref(false)
 const done = ref(false)
 const finishError = ref('')
 
-const languages = [
-  { value: 'cpp', label: 'C++' },
-  { value: 'python3', label: 'Python 3' },
-  { value: 'java', label: 'Java' },
-]
+const languages = LANGUAGE_OPTIONS
 
-// LLM/API 配置已解耦到设置页；向导只负责 Cookie 与偏好
+// LLM/API key config is decoupled into Settings; the wizard only covers
+// cookie and preferences
 const steps = computed(() => [i18n.t('setup_step_cookie'), i18n.t('setup_step_prefs')])
 
 const composedCookie = computed(() => {
@@ -58,10 +57,7 @@ async function validateAndNext() {
     cookieOk.value = true
   } catch (err) {
     cookieOk.value = false
-    cookieError.value =
-      (err.payload && err.payload.error && err.payload.error.message) ||
-      err.message ||
-      String(err)
+    cookieError.value = userFacingError(err)
   } finally {
     validating.value = false
   }
@@ -85,8 +81,7 @@ async function finish() {
     done.value = true
     setTimeout(() => router.push('/problems'), 800)
   } catch (err) {
-    finishError.value =
-      (err.payload && err.payload.error && err.payload.error.message) || err.message || String(err)
+    finishError.value = userFacingError(err)
   } finally {
     finishing.value = false
   }

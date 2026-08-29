@@ -40,7 +40,7 @@ export function paginate(rows, page, size) {
   }
 }
 
-export function compareById(a, b) {
+function compareById(a, b) {
   const fa = String(a.frontend_id || '')
   const fb = String(b.frontend_id || '')
   if (fa && fb && /^\d+$/.test(fa) && /^\d+$/.test(fb)) {

@@ -23,3 +23,15 @@ export function verdictLabel(i18n, statusKey, fallback = '') {
   // an untranslated key echoes itself -> fall back to the caller's text
   return translated !== `verdict_${statusKey}` ? translated : fallback
 }
+
+// zip expected/actual outputs into display rows; the shorter side pads with
+// an em dash so a truncated run output still lines up with its expectation.
+// One shared pairing with the History page so the tables cannot drift.
+export function pairCaseOutputs(expected = [], actual = []) {
+  const rows = []
+  const len = Math.max(expected.length, actual.length)
+  for (let i = 0; i < len; i += 1) {
+    rows.push({ expected: expected[i] ?? '—', actual: actual[i] ?? '—' })
+  }
+  return rows
+}

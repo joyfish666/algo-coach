@@ -1,13 +1,17 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { onBeforeRouteLeave } from 'vue-router'
-import MarkdownIt from 'markdown-it'
 
 import CodeEditor from '../components/CodeEditor.vue'
 import AiChatSidebar from '../components/AiChatSidebar.vue'
 import JudgeResultPanel from '../components/JudgeResultPanel.vue'
 import PageHeader from '../components/PageHeader.vue'
 import { api } from '../api'
+import { userFacingError } from '../utils/errors'
+import { difficultyLabel } from '../utils/difficulty'
+import { LANGUAGE_OPTIONS } from '../utils/languages'
+import { makeMarkdown } from '../utils/markdown'
+import { STORAGE_KEYS, readJsonStorage, writeJsonStorage } from '../utils/storage'
 import { useI18nStore } from '../stores/i18n'
 import { useToastStore } from '../stores/toast'
 import { loadSnapshot, saveSnapshot, snapshotNewerThan } from '../snapshots'
@@ -17,9 +21,9 @@ const props = defineProps({ qid: { type: String, required: true } })
 const i18n = useI18nStore()
 const toast = useToastStore()
 
-const md = new MarkdownIt({ html: false, linkify: false, breaks: false })
+const md = makeMarkdown()
 
-const SPLIT_KEY = 'algocoach-workbench-split'
+const SPLIT_KEY = STORAGE_KEYS.workbenchSplit
 
 const loading = ref(true)
 // fatal: the problem itself could not be loaded, the whole workbench cannot
@@ -29,14 +33,9 @@ const loadError = ref('')
 const problem = ref(null)
 const code = ref('')
 const lang = ref('cpp')
-const languages = [
-  { value: 'cpp', label: 'C++' },
-  { value: 'python3', label: 'Python 3' },
-  { value: 'java', label: 'Java' },
-]
+const languages = LANGUAGE_OPTIONS
 const switchingLang = ref(false)
 const statementHtml = ref('')
-const renderedStatement = computed(() => statementHtml.value)
 
 const useLocalCases = ref(false)
 const casesOpen = ref(true)
@@ -50,28 +49,11 @@ let notesTimer = null
 
 const favorite = ref(false)
 
-// difficulty enums render localized like everywhere else (the workbench
-// header used to show a raw "medium" in the zh UI); unknown values fall
-// back to the raw enum instead of an empty chip
-function difficultyLabel(value) {
-  const level = (value || '').toLowerCase()
-  return ['easy', 'medium', 'hard'].includes(level) ? i18n.t(`diff_${level}`) : value
-}
+// difficulty enums render localized like everywhere else; unknown values
+// fall back to the raw enum instead of an empty chip
 
-function errorMessageFor(err) {
-  const keyFromServer = err && err.payload && err.payload.error && err.payload.error.message_key
-  if (keyFromServer) {
-    const translated = i18n.t(keyFromServer)
-    if (translated !== keyFromServer) return translated
-  }
-  if (err && err.status === 403) return i18n.t('premium_problem')
-  return (err && err.message) || 'error'
-}
-
-// transient failures surface as toasts; the workbench stays alive and the
-// user keeps their in-progress code visible
 function notifyActionError(err) {
-  toast.error({ text: errorMessageFor(err) })
+  toast.error({ text: userFacingError(err) })
 }
 
 const inflightRun = ref(false)
@@ -126,21 +108,15 @@ const rightColRef = ref(null)
 const dragActive = ref(false)
 
 function readSplit() {
-  try {
-    const raw = JSON.parse(localStorage.getItem(SPLIT_KEY))
-    if (raw && typeof raw.mainPct === 'number' && typeof raw.editorPct === 'number') return raw
-  } catch {
-  }
+  const raw = readJsonStorage(SPLIT_KEY)
+  if (raw && typeof raw.mainPct === 'number' && typeof raw.editorPct === 'number') return raw
   return { mainPct: 42, editorPct: 66 }
 }
 
 const split = ref(readSplit())
 
 function persistSplit() {
-  try {
-    localStorage.setItem(SPLIT_KEY, JSON.stringify(split.value))
-  } catch {
-  }
+  writeJsonStorage(SPLIT_KEY, split.value)
 }
 
 let dragContext = null
@@ -256,7 +232,7 @@ async function loadProblem() {
 }
 
 function applyLoadError(err) {
-  loadError.value = errorMessageFor(err)
+  loadError.value = userFacingError(err)
   const detail = err && err.payload && err.payload.error && err.payload.error.detail
   if (detail && detail.last_poll) {
     try {
@@ -557,7 +533,7 @@ onBeforeUnmount(() => {
               :class="['easy', 'medium', 'hard'].includes(problem.difficulty) ? `chip-${problem.difficulty}` : ''"
               :to="{ path: '/problems', query: { difficulty: problem.difficulty } }"
             >
-              {{ difficultyLabel(problem.difficulty) }}
+              {{ difficultyLabel(problem.difficulty, problem.difficulty) }}
             </RouterLink>
             <span v-if="problem.paid_only" class="chip">★</span>
             <RouterLink
@@ -577,7 +553,7 @@ onBeforeUnmount(() => {
         <section ref="leftPaneRef" class="pane left-pane" :style="{ width: split.mainPct + '%' }">
           <div class="card pane-card">
             <h2>{{ i18n.t('problem_statement') }}</h2>
-            <div class="statement" v-html="renderedStatement"></div>
+            <div class="statement" v-html="statementHtml"></div>
           </div>
           <details v-if="(problem.hints || []).length" class="card hints-card">
             <summary>{{ i18n.t('hints_toggle', { count: (problem.hints || []).length }) }}</summary>

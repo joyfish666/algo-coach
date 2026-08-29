@@ -4,12 +4,14 @@ import { computed, onMounted, ref } from 'vue'
 import PageHeader from '../components/PageHeader.vue'
 import StatCard from '../components/StatCard.vue'
 import TagMasteryChart from '../components/TagMasteryChart.vue'
-import MarkdownIt from 'markdown-it'
 import { api } from '../api'
+import { userFacingError } from '../utils/errors'
+import { difficultyClass, difficultyLabel } from '../utils/difficulty'
+import { makeMarkdown } from '../utils/markdown'
 import { useI18nStore } from '../stores/i18n'
 
 const i18n = useI18nStore()
-const md = new MarkdownIt({ html: false, linkify: false })
+const md = makeMarkdown()
 
 const loading = ref(true)
 // fatal: the very first stats load failed, nothing can render. Transient
@@ -55,8 +57,7 @@ async function loadAnalyze(useLlm = false) {
     // reloading stats used to silently wipe a report the user just paid
     // 1-2 minutes of LLM time for
   } catch (err) {
-    const message =
-      (err.payload && err.payload.error && err.payload.error.message) || err.message || String(err)
+    const message = userFacingError(err)
     if (!data.value && !useLlm) {
       loadError.value = message
     } else {
@@ -82,22 +83,10 @@ async function importSite() {
     await loadAnalyze(false)
   } catch (err) {
     importFailed.value = true
-    importMessage.value =
-      (err.payload && err.payload.error && err.payload.error.message) || err.message || String(err)
+    importMessage.value = userFacingError(err)
   } finally {
     importing.value = false
   }
-}
-
-function difficultyLabel(value) {
-  const map = { easy: 'diff_easy', medium: 'diff_medium', hard: 'diff_hard' }
-  const key = map[(value || '').toLowerCase()]
-  return key ? i18n.t(key) : value
-}
-
-function difficultyClass(value) {
-  const level = (value || '').toLowerCase()
-  return ['easy', 'medium', 'hard'].includes(level) ? `chip-${level}` : ''
 }
 
 onMounted(() => loadAnalyze(false))
@@ -161,7 +150,7 @@ onMounted(() => loadAnalyze(false))
               <RouterLink :to="`/problem/${row.slug}`" class="rec-item">
                 <span class="mono rec-id">{{ row.frontend_id }}</span>
                 <span>{{ row.title_cn || row.title_en || row.slug }}</span>
-                <span v-if="row.difficulty" class="chip" :class="difficultyClass(row.difficulty)">{{ difficultyLabel(row.difficulty) }}</span>
+                <span v-if="row.difficulty" class="chip" :class="difficultyClass(row.difficulty)">{{ difficultyLabel(row.difficulty, row.difficulty) }}</span>
               </RouterLink>
             </li>
           </ul>

@@ -1,6 +1,7 @@
 <script setup>
 import { computed } from 'vue'
 
+import { difficultyClass, difficultyLabel } from '../utils/difficulty'
 import { useI18nStore } from '../stores/i18n'
 
 const props = defineProps({
@@ -11,18 +12,11 @@ const emit = defineEmits(['toggle-favorite'])
 
 const i18n = useI18nStore()
 
-const difficultyLabel = computed(() => {
-  const map = { easy: 'diff_easy', medium: 'diff_medium', hard: 'diff_hard' }
-  const key = map[(props.row.difficulty || '').toLowerCase()]
-  return key ? i18n.t(key) : ''
-})
+const label = computed(() => difficultyLabel(props.row.difficulty))
 
 // semantic color class comes straight from the token palette so the chip
 // can never drift from the rest of the design system
-const difficultyClass = computed(() => {
-  const level = (props.row.difficulty || '').toLowerCase()
-  return ['easy', 'medium', 'hard'].includes(level) ? `chip-${level}` : ''
-})
+const chipClass = computed(() => difficultyClass(props.row.difficulty))
 
 const visibleTags = computed(() => (props.row.tags || []).slice(0, 3))
 const extraTagCount = computed(() => Math.max(0, (props.row.tags || []).length - 3))
@@ -67,7 +61,7 @@ function onToggleFavorite() {
       <span v-else-if="row.practice_status" class="chip pstatus" data-testid="status-attempted">
         {{ i18n.t('status_attempted') }}
       </span>
-      <span v-if="difficultyLabel" class="chip" :class="difficultyClass">{{ difficultyLabel }}</span>
+      <span v-if="label" class="chip" :class="chipClass">{{ label }}</span>
       <span
         v-if="row.paid_only"
         class="paid-mark"

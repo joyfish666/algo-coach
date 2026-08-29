@@ -1,8 +1,10 @@
 <script setup>
-import { nextTick, onBeforeUnmount, ref, watch } from 'vue'
-import MarkdownIt from 'markdown-it'
+import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 import { api } from '../api'
+import { userFacingError } from '../utils/errors'
+import { makeMarkdown } from '../utils/markdown'
+import { STORAGE_KEYS, readJsonStorage, writeJsonStorage } from '../utils/storage'
 import { useI18nStore } from '../stores/i18n'
 import { useStatusStore } from '../stores/status'
 
@@ -29,11 +31,11 @@ if (!status.loaded) {
 
 // Every OpenAI-compatible model replies in Markdown (bold, lists, code
 // fences) - plain-text interpolation leaked the markers into the chat as
-// literal "**". html:false escapes whatever the model emits, same posture as
-// the analytics report renderer; breaks:true suits chat-style line wrapping.
-const md = new MarkdownIt({ html: false, linkify: false, breaks: true })
+// literal "**". breaks:true suits chat-style line wrapping (the statement
+// and report renderers keep CommonMark paragraph rules).
+const md = makeMarkdown({ breaks: true })
 
-const POS_KEY = 'algocoach-ai-pos'
+const POS_KEY = STORAGE_KEYS.aiPos
 
 const open = ref(false)
 const messages = ref([])
@@ -44,11 +46,8 @@ const listEl = ref(null)
 const panelEl = ref(null)
 
 function readPos() {
-  try {
-    const raw = JSON.parse(localStorage.getItem(POS_KEY))
-    if (raw && typeof raw.x === 'number' && typeof raw.y === 'number') return raw
-  } catch {
-  }
+  const raw = readJsonStorage(POS_KEY)
+  if (raw && typeof raw.x === 'number' && typeof raw.y === 'number') return raw
   return null
 }
 
@@ -76,7 +75,9 @@ function reclampToViewport() {
   pos.value = clamp(pos.value.x, pos.value.y)
 }
 
-window.addEventListener('resize', reclampToViewport)
+onMounted(() => {
+  window.addEventListener('resize', reclampToViewport)
+})
 
 function onGlobalKeydown(event) {
   if (event.key === 'Escape' && !event.isComposing) {
@@ -108,10 +109,7 @@ function endDrag() {
   document.body.style.userSelect = ''
   window.removeEventListener('mousemove', onDragMove)
   window.removeEventListener('mouseup', endDrag)
-  try {
-    if (pos.value) localStorage.setItem(POS_KEY, JSON.stringify(pos.value))
-  } catch {
-  }
+  if (pos.value) writeJsonStorage(POS_KEY, pos.value)
 }
 
 onBeforeUnmount(() => {
@@ -190,10 +188,7 @@ async function send() {
     })
   } catch (err) {
     if (askedQid !== props.qid) return
-    const message =
-      (err.payload && err.payload.detail) ||
-      (err.payload && err.payload.error && err.payload.error.message) ||
-      err.message
+    const message = userFacingError(err)
     messages.value.push({ role: 'assistant', content: `⚠️ ${message}`, error: true })
   } finally {
     if (askedQid === props.qid) {

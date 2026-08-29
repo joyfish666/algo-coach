@@ -8,6 +8,8 @@ import { useRouter } from 'vue-router'
 
 import { api } from '../api'
 import { debugEnabled, setDebugEnabled } from '../debug'
+import { userFacingError } from '../utils/errors'
+import { LANGUAGE_OPTIONS } from '../utils/languages'
 import { purgeAllSnapshots } from '../snapshots'
 import { useI18nStore } from '../stores/i18n'
 import { useStatusStore } from '../stores/status'
@@ -22,7 +24,7 @@ const saving = ref(false)
 const savedAt = ref('')
 const saveError = ref('')
 
-// AI/LLM 配置独立于 Cookie：在这里单独填写与保存
+// LLM config is independent of the cookie: entered and saved here
 const llmKey = ref('')
 const llmBaseUrl = ref('')
 const llmModel = ref('')
@@ -36,11 +38,7 @@ const clearingData = ref(false)
 const clearMessage = ref('')
 const clearConfirmInput = ref('')
 
-const languages = [
-  { value: 'cpp', label: 'C++' },
-  { value: 'python3', label: 'Python 3' },
-  { value: 'java', label: 'Java' },
-]
+const languages = LANGUAGE_OPTIONS
 
 onMounted(async () => {
   try {
@@ -70,7 +68,7 @@ async function saveDefaultLanguage() {
   }
 }
 
-// 留空 Key 表示不修改已保存的值；接口地址与模型按当前输入保存
+// an empty key means "keep the saved value"; base URL and model save as typed
 async function saveLlm() {
   if (savingLlm.value) return
   savingLlm.value = true
@@ -90,14 +88,14 @@ async function saveLlm() {
     llmKey.value = ''
     llmSavedAt.value = i18n.formatDateTime(new Date())
   } catch (err) {
-    llmError.value =
-      (err.payload && err.payload.error && err.payload.error.message) || err.message || String(err)
+    llmError.value = userFacingError(err)
   } finally {
     savingLlm.value = false
   }
 }
 
-// 连通性探测：用表单当前值（未填的回退到已保存配置），不必先保存
+// connectivity probe: uses the form values (falling back to the saved
+// config where empty) so the user can verify before saving
 const testingLlm = ref(false)
 const llmTestOk = ref('')
 const llmTestError = ref('')
@@ -118,8 +116,7 @@ async function testLlm() {
     const elapsed = Math.round(performance.now() - startedAt)
     llmTestOk.value = i18n.t('llm_test_ok', { model: result.model, ms: elapsed })
   } catch (err) {
-    llmTestError.value =
-      (err.payload && err.payload.error && err.payload.error.message) || err.message || String(err)
+    llmTestError.value = userFacingError(err)
   } finally {
     testingLlm.value = false
   }
@@ -142,10 +139,7 @@ async function eraseAllData() {
     await status.refresh()
     setTimeout(() => router.push('/setup'), 900)
   } catch (err) {
-    clearMessage.value =
-      (err.payload && err.payload.detail) ||
-      (err.payload && err.payload.error && err.payload.error.message) ||
-      err.message
+    clearMessage.value = userFacingError(err)
   } finally {
     clearingData.value = false
   }

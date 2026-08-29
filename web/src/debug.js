@@ -1,13 +1,12 @@
 import { ref } from 'vue'
 
-const KEY = 'algocoach-debug'
+import { STORAGE_KEYS, readStorage, writeStorage } from './utils/storage'
+
+const KEY = STORAGE_KEYS.debug
 const MAX_ENTRIES = 300
 
 function initialEnabled() {
-  try {
-    if (localStorage.getItem(KEY) === '1') return true
-  } catch {
-  }
+  if (readStorage(KEY) === '1') return true
   return new URLSearchParams(window.location.search).has('debug')
 }
 
@@ -66,10 +65,7 @@ function unpatchConsole() {
 
 export function setDebugEnabled(value) {
   debugEnabled.value = value
-  try {
-    localStorage.setItem(KEY, value ? '1' : '0')
-  } catch {
-  }
+  writeStorage(KEY, value ? '1' : '0')
   if (value) {
     install()
     patchConsole()
@@ -81,7 +77,7 @@ export function setDebugEnabled(value) {
   }
 }
 
-export function debugCopyText() {
+function debugCopyText() {
   return debugEntries.value.join('\n----------------------------------------------------------------------\n')
 }
 

@@ -1,16 +1,13 @@
 import { defineStore } from 'pinia'
 
-const STORAGE_KEY = 'algocoach-theme'
+import { STORAGE_KEYS, readStorage, writeStorage } from '../utils/storage'
+
 // module-level so re-mounting App (HMR/tests) cannot stack duplicate
 // matchMedia listeners that would never be removed
 let mediaBound = false
 
 function readStoredTheme() {
-  try {
-    return localStorage.getItem(STORAGE_KEY)
-  } catch {
-    return null
-  }
+  return readStorage(STORAGE_KEYS.theme)
 }
 
 export const useThemeStore = defineStore('theme', {
@@ -29,10 +26,7 @@ export const useThemeStore = defineStore('theme', {
     },
     set(theme) {
       this.theme = theme
-      try {
-        localStorage.setItem(STORAGE_KEY, theme)
-      } catch {
-      }
+      writeStorage(STORAGE_KEYS.theme, theme)
       this.apply()
     },
     init() {

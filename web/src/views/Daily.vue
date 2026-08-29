@@ -4,6 +4,8 @@ import { useRouter } from 'vue-router'
 
 import PageHeader from '../components/PageHeader.vue'
 import { api } from '../api'
+import { userFacingError } from '../utils/errors'
+import { difficultyLabel } from '../utils/difficulty'
 import { useI18nStore } from '../stores/i18n'
 
 const i18n = useI18nStore()
@@ -13,12 +15,6 @@ const loading = ref(true)
 const errorText = ref('')
 const daily = ref(null)
 
-const difficultyLabel = (value) => {
-  const map = { easy: 'diff_easy', medium: 'diff_medium', hard: 'diff_hard' }
-  const key = map[(value || '').toLowerCase()]
-  return key ? i18n.t(key) : ''
-}
-
 async function loadDaily() {
   loading.value = true
   errorText.value = ''
@@ -26,8 +22,7 @@ async function loadDaily() {
   try {
     daily.value = await api.getDaily()
   } catch (err) {
-    errorText.value =
-      (err.payload && err.payload.error && err.payload.error.message) || err.message || String(err)
+    errorText.value = userFacingError(err)
   } finally {
     loading.value = false
   }

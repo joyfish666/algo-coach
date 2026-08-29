@@ -10,9 +10,10 @@ import { useStatusStore } from '../stores/status'
 import { useSyncStore } from '../stores/sync'
 import { useToastStore } from '../stores/toast'
 import { collectTags, filterProblems, paginate, pickRandom, sortByMode } from '../utils/problems'
+import { STORAGE_KEYS, readStorage, writeStorage } from '../utils/storage'
 
 const PAGE_SIZE = 50
-const DENSITY_KEY = 'algocoach-density'
+const DENSITY_KEY = STORAGE_KEYS.density
 
 const i18n = useI18nStore()
 const status = useStatusStore()
@@ -36,19 +37,12 @@ const dense = ref(readDensity())
 const page = ref(1)
 
 function readDensity() {
-  try {
-    return localStorage.getItem(DENSITY_KEY) === 'dense'
-  } catch {
-    return false
-  }
+  return readStorage(DENSITY_KEY) === 'dense'
 }
 
 function toggleDensity() {
   dense.value = !dense.value
-  try {
-    localStorage.setItem(DENSITY_KEY, dense.value ? 'dense' : 'cozy')
-  } catch {
-  }
+  writeStorage(DENSITY_KEY, dense.value ? 'dense' : 'cozy')
 }
 
 const tagOptions = computed(() => collectTags(problems.value))

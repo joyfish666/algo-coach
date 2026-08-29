@@ -1,5 +1,7 @@
-const PREFIX = 'algocoach-snapshot:'
-const INDEX_KEY = 'algocoach-snapshot-index'
+import { STORAGE_KEYS, readJsonStorage, writeJsonStorage } from './utils/storage'
+
+const PREFIX = STORAGE_KEYS.snapshotPrefix
+const INDEX_KEY = STORAGE_KEYS.snapshotIndex
 const MAX_SNAPSHOTS = 20
 
 function snapshotKey(qid, lang) {
@@ -9,12 +11,7 @@ function snapshotKey(qid, lang) {
 export function saveSnapshot(qid, lang, content) {
   const key = snapshotKey(qid, lang)
   const entry = { k: key, t: Date.now() }
-  let index
-  try {
-    index = JSON.parse(localStorage.getItem(INDEX_KEY) || '[]')
-  } catch {
-    index = []
-  }
+  let index = readJsonStorage(INDEX_KEY) || []
   index = index.filter((item) => item.k !== key)
   index.unshift(entry)
   while (index.length > MAX_SNAPSHOTS) {
@@ -26,24 +23,14 @@ export function saveSnapshot(qid, lang, content) {
       }
     }
   }
-  try {
-    localStorage.setItem(key, JSON.stringify({ c: content, t: entry.t }))
-    localStorage.setItem(INDEX_KEY, JSON.stringify(index))
-  } catch {
-    /* quota exceeded: drop silently */
-  }
+  writeJsonStorage(key, { c: content, t: entry.t })
+  writeJsonStorage(INDEX_KEY, index)
 }
 
 export function loadSnapshot(qid, lang) {
-  try {
-    const raw = localStorage.getItem(snapshotKey(qid, lang))
-    if (!raw) return null
-    const parsed = JSON.parse(raw)
-    if (!parsed || typeof parsed.c !== 'string') return null
-    return parsed
-  } catch {
-    return null
-  }
+  const parsed = readJsonStorage(snapshotKey(qid, lang))
+  if (!parsed || typeof parsed.c !== 'string') return null
+  return parsed
 }
 
 export function snapshotNewerThan(snapshot, epochSeconds) {
