@@ -4,7 +4,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 import lc.auth as auth
-from server import api as api_module
+from lc import workspace
+from server import app as app_module, state
 
 
 class FakeJudgeAdapter:
@@ -87,12 +88,12 @@ def isolated_env(tmp_path, monkeypatch):
 
 @pytest.fixture
 def client():
-    return TestClient(api_module.app, base_url="http://127.0.0.1:8000")
+    return TestClient(app_module.app, base_url="http://127.0.0.1:8000")
 
 
 def open_problem(client, monkeypatch, adapter=None):
     adapter = adapter or FakeJudgeAdapter()
-    monkeypatch.setattr(api_module, "create_adapter", lambda: adapter)
+    monkeypatch.setattr(state, "create_adapter", lambda: adapter)
     response = client.get("/api/problem/two-sum")
     assert response.status_code == 200
     return adapter
@@ -122,7 +123,7 @@ def test_save_before_judge_persists_editor_code(client, monkeypatch):
         json={"qid": "two-sum", "lang": "cpp", "code": editor_code, "use_local": False},
         headers=ORIGIN,
     )
-    saved = (api_module.problems.find_problem_dir(api_module._workspace_root(), "two-sum") / "solution.cpp").read_text(encoding="utf-8")
+    saved = (workspace.find_problem_dir(state.workspace_root(), "two-sum") / "solution.cpp").read_text(encoding="utf-8")
     assert saved == editor_code
     assert adapter.runs[0]["code"] == editor_code
 
@@ -180,7 +181,7 @@ def test_put_solution_endpoint_writes_file(client, monkeypatch):
         headers=ORIGIN,
     )
     assert response.status_code == 200
-    directory = api_module.problems.find_problem_dir(api_module._workspace_root(), "two-sum")
+    directory = workspace.find_problem_dir(state.workspace_root(), "two-sum")
     assert (directory / "solution.py").read_text(encoding="utf-8") == "# hello\n"
     unsupported = client.put(
         "/api/problem/two-sum/solution",
@@ -198,16 +199,16 @@ def test_create_adapter_lazy_initializes_from_config(client, monkeypatch):
     data["request_interval"] = 3.0
     config.save(data)
     auth.reset_state()
-    api_module.reset_app_state()
+    state.reset_app_state()
 
-    adapter = api_module.create_adapter()
+    adapter = state.create_adapter()
     session = auth.get_session()
     assert session.cookies.get("csrftoken") == "tok9"
     assert adapter.client.limiter.interval == 3.0
 
 
 def test_judge_requires_existing_problem(client, monkeypatch):
-    monkeypatch.setattr(api_module, "create_adapter", lambda: FakeJudgeAdapter())
+    monkeypatch.setattr(state, "create_adapter", lambda: FakeJudgeAdapter())
     response = client.post(
         "/api/judge/run",
         json={"qid": "ghost-problem", "lang": "cpp", "code": "x"},
@@ -230,7 +231,7 @@ def test_judge_without_internal_question_id_fails_loudly(client, monkeypatch):
         headers=ORIGIN,
     )
     assert response.status_code == 422
-    assert response.json()["detail"]
+    assert response.json()["error"]
     assert adapter.runs == []
 
     response = client.post(
@@ -250,7 +251,7 @@ def test_workspace_writes_leave_no_temp_files(client, monkeypatch):
     client.put("/api/problem/two-sum/notes", json={"content": "# note"}, headers=ORIGIN)
     client.put("/api/problem/two-sum/testcases", json={"content": "[1]\n2"}, headers=ORIGIN)
 
-    directory = api_module.problems.find_problem_dir(api_module._workspace_root(), "two-sum")
+    directory = workspace.find_problem_dir(state.workspace_root(), "two-sum")
     leftovers = [p.name for p in directory.iterdir() if p.name.endswith(".tmp")]
     assert leftovers == []
     assert (directory / "notes.md").read_text(encoding="utf-8") == "# note"
@@ -298,3 +299,51 @@ def test_check_payload_interpret_style_without_state_counts_as_finished():
 
     empty_pending = normalize_check_payload({"foo": 1})
     assert empty_pending["finished"] is False
+
+
+# ---------------------------------------------------------------------------
+# judge submit degrades when the local archive cannot be written
+
+
+def test_submit_returns_verdict_when_archive_append_fails(client, monkeypatch):
+    """The submit succeeded on the site and cannot be replayed; an OSError on
+    the local append used to mask it as a 500 and invited a duplicate."""
+    from lc import problems, workspace
+
+    directory = workspace.problem_dir_for({"slug": "two-sum", "frontend_id": "1"})
+    directory.mkdir(parents=True, exist_ok=True)
+    workspace.save_meta(directory, {"internal_question_id": "1"})
+    cache = {"schema_version": 1, "synced_at": None, "total": 0, "problems": []}
+    problems.save_problems(cache)
+
+    class FailingArchive:
+        def append(self, record):
+            raise OSError("disk full")
+
+        def has_submission(self, submission_id):
+            return False
+
+    monkeypatch.setattr(state, "get_archive", lambda: FailingArchive())
+
+    class FakeAdapter:
+        def fetch_question_detail(self, slug):
+            return {"slug": slug, "internal_question_id": "1"}
+
+    monkeypatch.setattr(state, "create_adapter", lambda: FakeAdapter())
+
+    from lc import judge as judge_module
+
+    def fake_judge_submit(adapter, **kwargs):
+        return {"status_key": "accepted", "submission_id": "s1", "total_correct": 1}
+
+    monkeypatch.setattr(judge_module, "judge_submit", fake_judge_submit)
+
+    response = client.post(
+        "/api/judge/submit",
+        json={"qid": "two-sum", "lang": "cpp", "code": "int main(){}"},
+        headers=ORIGIN,
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status_key"] == "accepted"
+    assert body["archived"] is False

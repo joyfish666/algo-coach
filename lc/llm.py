@@ -25,6 +25,10 @@ from lc.logutil import logger
 
 THINKING_LEVELS = ("off", "low", "medium", "high")
 
+# Single source for the fallback model: config leaves llm_model empty by
+# default, and every call site that must name a concrete model uses this.
+DEFAULT_MODEL = "deepseek-v4-flash"
+
 
 def normalize_thinking(value: str) -> str:
     value = (value or "").strip().lower()
@@ -46,13 +50,13 @@ class LLMClient:
         *,
         base_url: str,
         api_key: str,
-        model: str = "deepseek-v4-flash",
+        model: str = DEFAULT_MODEL,
         timeout: float = 120.0,
         thinking: str = "default",
     ):
         self.endpoint = normalize_base_url(base_url)
         self.api_key = api_key
-        self.model = model or "deepseek-v4-flash"
+        self.model = model or DEFAULT_MODEL
         self.timeout = float(timeout)
         self.thinking = normalize_thinking(thinking)
 

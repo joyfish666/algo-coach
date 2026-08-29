@@ -44,6 +44,18 @@ DEFAULTS = {
     "workspace_root": "",
 }
 
+# Setting fields the API must never echo back verbatim; mask_secret shows
+# only a short tail (see the settings router).
+SECRET_CONFIG_KEYS = ("cookie", "csrf_token", "llm_api_key")
+
+# The settings API accepts exactly the user-settable keys (DEFAULTS minus the
+# schema bookkeeping), and each is overridable through the environment under
+# ALGOCOACH_<UPPER_SNAKE_KEY>. Deriving both from DEFAULTS keeps the three
+# surfaces (config file, env, settings API) from drifting apart.
+_SETTING_KEYS = tuple(k for k in DEFAULTS if k != "schema_version")
+
+ENV_OVERRIDES = {key: f"ALGOCOACH_{key.upper()}" for key in _SETTING_KEYS}
+
 # Politeness bounds for the leetcode.cn rate limiter: below 0.5s the pacing
 # gate is effectively off (risking site-side throttling/bans), above 60s a
 # full sync would take hours; the LLM timeout must stay inside [5, 600] so a
@@ -63,18 +75,6 @@ RANGE_LIMITS = {
 # Note on UI preferences (theme / interface language): they are browser-side
 # concerns persisted in localStorage by the web app. They deliberately do NOT
 # live here - duplicating them created dead config keys nothing consumed.
-
-ENV_OVERRIDES = {
-    "cookie": "ALGOCOACH_COOKIE",
-    "llm_api_key": "ALGOCOACH_LLM_API_KEY",
-    "llm_base_url": "ALGOCOACH_LLM_BASE_URL",
-    "llm_model": "ALGOCOACH_LLM_MODEL",
-    "llm_thinking": "ALGOCOACH_LLM_THINKING",
-    "llm_timeout": "ALGOCOACH_LLM_TIMEOUT",
-    "default_language": "ALGOCOACH_DEFAULT_LANGUAGE",
-    "request_interval": "ALGOCOACH_REQUEST_INTERVAL",
-    "workspace_root": "ALGOCOACH_WORKSPACE_ROOT",
-}
 
 _MIGRATIONS = {}
 

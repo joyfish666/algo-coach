@@ -13,7 +13,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import lc.auth as auth
-from server import api as api_module
+from server import app as app_module, state
 
 ORIGIN = {"Origin": "http://localhost:5173"}
 
@@ -98,7 +98,7 @@ def isolated_env(tmp_path, monkeypatch):
 
 @pytest.fixture
 def client():
-    return TestClient(api_module.app, base_url="http://127.0.0.1:8000")
+    return TestClient(app_module.app, base_url="http://127.0.0.1:8000")
 
 
 def wait_sync_done(client):
@@ -113,7 +113,7 @@ def wait_sync_done(client):
 
 def test_full_practice_flow_end_to_end(client, monkeypatch):
     adapter = FlowAdapter()
-    monkeypatch.setattr(api_module, "create_adapter", lambda: adapter)
+    monkeypatch.setattr(state, "create_adapter", lambda: adapter)
 
     # -- setup ---------------------------------------------------------------
     status = client.get("/api/status").json()
@@ -182,7 +182,7 @@ def test_second_sync_picks_up_site_additions(client, monkeypatch):
     """The API-level face of the resume bug: clicking sync twice must not be a
     silent no-op after the first completed sync."""
     adapter = FlowAdapter()
-    monkeypatch.setattr(api_module, "create_adapter", lambda: adapter)
+    monkeypatch.setattr(state, "create_adapter", lambda: adapter)
 
     client.post("/api/problems/sync", headers=ORIGIN)
     assert wait_sync_done(client)["error"] is None

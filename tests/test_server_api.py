@@ -5,7 +5,12 @@ import pytest
 from fastapi.testclient import TestClient
 
 import lc.auth as auth
-from server import api as api_module
+import lc.config as config
+from lc.exceptions import RateLimitError
+from lc import problems, workspace
+from server import app as app_module, state
+from server.errors import require_safe_qid
+from server.routers.settings import mask_secret
 
 
 class FakeResponse:
@@ -72,7 +77,7 @@ def isolated_env(tmp_path, monkeypatch):
 
 @pytest.fixture
 def client():
-    return TestClient(api_module.app, base_url="http://127.0.0.1:8000")
+    return TestClient(app_module.app, base_url="http://127.0.0.1:8000")
 
 
 def seed_config(**overrides):
@@ -151,7 +156,7 @@ def test_validate_cookie_endpoint_success(client, monkeypatch):
         assert cookie == "good-cookie"
         return {"signed_in": True, "premium": False}
 
-    monkeypatch.setattr(api_module, "validate_cookie_standalone", fake_standalone)
+    monkeypatch.setattr(state, "validate_cookie_standalone", fake_standalone)
     response = client.post(
         "/api/setup/validate-cookie", json={"cookie": "good-cookie"}, headers=ORIGIN
     )
@@ -199,7 +204,7 @@ def test_sync_flow_with_progress_and_conflict(client, monkeypatch, tmp_path):
     def factory():
         return FakeAdapter(pages=pages, total=150, gate=gate)
 
-    monkeypatch.setattr(api_module, "create_adapter", factory)
+    monkeypatch.setattr(state, "create_adapter", factory)
     response = client.post("/api/problems/sync", headers=ORIGIN)
     assert response.status_code == 200
     assert response.json()["started"] is True
@@ -238,7 +243,7 @@ def test_problems_list_enriches_practice_status(client):
         "total": len(cache_rows), "problems": cache_rows,
     }), encoding="utf-8")
 
-    archive = api_module.get_archive()
+    archive = state.get_archive()
     archive.append({
         "schema": 1, "timestamp": "2026-08-23T10:00:00+00:00", "slug": "two-sum",
         "frontend_id": "1", "submission_id": "s1", "lang": "cpp", "status": "accepted",
@@ -261,7 +266,7 @@ def test_daily_endpoint(client, monkeypatch):
     def factory():
         return FakeAdapter(daily=daily_row)
 
-    monkeypatch.setattr(api_module, "create_adapter", factory)
+    monkeypatch.setattr(state, "create_adapter", factory)
     response = client.get("/api/daily")
     assert response.status_code == 200
     assert response.json()["slug"] == "two-sum"
@@ -288,7 +293,7 @@ DETAIL_FIXTURE = {
 
 def test_open_problem_materializes_and_serves_offline(client, monkeypatch):
     adapter = FakeAdapter(detail=DETAIL_FIXTURE)
-    monkeypatch.setattr(api_module, "create_adapter", lambda: adapter)
+    monkeypatch.setattr(state, "create_adapter", lambda: adapter)
 
     first = client.get("/api/problem/two-sum")
     assert first.status_code == 200
@@ -307,13 +312,13 @@ def test_open_problem_materializes_and_serves_offline(client, monkeypatch):
     detail_calls = [call for call in adapter.calls if call[0] == "detail"]
     assert len(detail_calls) == 1
 
-    problems_cache = api_module.problems.load_problems()
+    problems_cache = problems.load_problems()
     assert any(row["slug"] == "two-sum" for row in problems_cache["problems"])
 
 
 def test_post_refresh_refetches_detail(client, monkeypatch):
     adapter = FakeAdapter(detail=DETAIL_FIXTURE)
-    monkeypatch.setattr(api_module, "create_adapter", lambda: adapter)
+    monkeypatch.setattr(state, "create_adapter", lambda: adapter)
     client.get("/api/problem/two-sum")
     refreshed = client.post("/api/problem/two-sum/refresh", headers=ORIGIN)
     assert refreshed.status_code == 200
@@ -324,7 +329,7 @@ def test_post_refresh_refetches_detail(client, monkeypatch):
 def test_get_refresh_query_no_longer_triggers_fetch(client, monkeypatch):
     """GET is side-effect free now: ?refresh=1 must not refetch remotely."""
     adapter = FakeAdapter(detail=DETAIL_FIXTURE)
-    monkeypatch.setattr(api_module, "create_adapter", lambda: adapter)
+    monkeypatch.setattr(state, "create_adapter", lambda: adapter)
     client.get("/api/problem/two-sum")
     response = client.get("/api/problem/two-sum?refresh=1")
     assert response.status_code == 200
@@ -337,9 +342,9 @@ def test_require_safe_slug_rejects_traversal_payloads():
 
     for bad in ["..", "../solution", r"..\..\target", "a/b", ".hidden", "%2e%2e", "", None]:
         with pytest.raises(HTTPException) as excinfo:
-            api_module._require_safe_slug(bad)
+            require_safe_qid(bad)
         assert excinfo.value.status_code == 400
-    assert api_module._require_safe_slug("two-sum") == "two-sum"
+    assert require_safe_qid("two-sum") == "two-sum"
 
 
 def test_get_problem_rejects_traversal_qid_over_http(client):
@@ -364,7 +369,7 @@ def test_host_guard_accepts_ipv6_loopback(client):
 
 def test_template_on_demand_then_exists(client, monkeypatch):
     adapter = FakeAdapter(detail=DETAIL_FIXTURE)
-    monkeypatch.setattr(api_module, "create_adapter", lambda: adapter)
+    monkeypatch.setattr(state, "create_adapter", lambda: adapter)
     client.get("/api/problem/two-sum")
 
     first = client.get("/api/problem/two-sum/template?lang=python3")
@@ -380,7 +385,7 @@ def test_template_on_demand_then_exists(client, monkeypatch):
 
 def test_put_testcases_writes_file(client, monkeypatch):
     adapter = FakeAdapter(detail=DETAIL_FIXTURE)
-    monkeypatch.setattr(api_module, "create_adapter", lambda: adapter)
+    monkeypatch.setattr(state, "create_adapter", lambda: adapter)
     client.get("/api/problem/two-sum")
     response = client.put(
         "/api/problem/two-sum/testcases",
@@ -388,8 +393,8 @@ def test_put_testcases_writes_file(client, monkeypatch):
         headers=ORIGIN,
     )
     assert response.status_code == 200
-    state = client.get("/api/problem/two-sum").json()
-    assert state["testcases"] == "[3,3]\n6"
+    problem_state = client.get("/api/problem/two-sum").json()
+    assert problem_state["testcases"] == "[3,3]\n6"
 
 
 def test_domain_exception_translated_to_401_shape(client, monkeypatch):
@@ -398,7 +403,7 @@ def test_domain_exception_translated_to_401_shape(client, monkeypatch):
     def fake_standalone(cookie):
         raise AuthError("expired", detail={"shape": "403"})
 
-    monkeypatch.setattr(api_module, "validate_cookie_standalone", fake_standalone)
+    monkeypatch.setattr(state, "validate_cookie_standalone", fake_standalone)
     response = client.post(
         "/api/setup/validate-cookie", json={"cookie": "bad"}, headers=ORIGIN
     )
@@ -418,7 +423,7 @@ def test_unknown_problem_returns_404(client, monkeypatch):
         )
         return adapter
 
-    monkeypatch.setattr(api_module, "create_adapter", factory)
+    monkeypatch.setattr(state, "create_adapter", factory)
     response = client.get("/api/problem/does-not-exist")
     assert response.status_code == 404
 
@@ -433,25 +438,25 @@ def test_spa_fallback_never_serves_sibling_of_dist(tmp_path, monkeypatch):
     sibling_file = tmp_path / "dist-old" / "secret.txt"
     sibling_file.parent.mkdir()
     sibling_file.write_text("secret", encoding="utf-8")
-    monkeypatch.setattr(api_module, "DIST_DIR", dist)
+    monkeypatch.setattr(app_module, "DIST_DIR", dist)
 
     # asset-shaped paths (and traversal payloads) must 404 instead of being
     # rewritten to index.html: a missing hashed chunk answered with HTML used
     # to surface as an opaque MIME error and silently kill every navigation
     # from a stale tab
     with pytest.raises(HTTPException) as excinfo:
-        api_module.spa_fallback("../dist-old/secret.txt")
+        app_module.spa_fallback("../dist-old/secret.txt")
     assert excinfo.value.status_code == 404
     assert str(sibling_file) not in str(excinfo.value)
 
     with pytest.raises(HTTPException) as stale_info:
-        api_module.spa_fallback("assets/ProblemDetail-deadbeef.js")
+        app_module.spa_fallback("assets/ProblemDetail-deadbeef.js")
     assert stale_info.value.status_code == 404
 
-    normal = api_module.spa_fallback("index.html")
+    normal = app_module.spa_fallback("index.html")
     assert str(dist / "index.html") == str(getattr(normal, "path", ""))
 
-    root = api_module.spa_fallback("")
+    root = app_module.spa_fallback("")
     assert str(dist / "index.html") == str(getattr(root, "path", ""))
 
 
@@ -484,7 +489,7 @@ def test_local_data_erase_removes_files_keeps_lock_and_resets_auth(client):
 
 def test_local_data_rejects_while_sync_running(client, monkeypatch):
     monkeypatch.setattr(
-        api_module._sync_engine, "progress", lambda: {"running": True}
+        state.sync_engine, "progress", lambda: {"running": True}
     )
     response = client.delete("/api/local-data", headers=ORIGIN)
     assert response.status_code == 409
@@ -497,14 +502,14 @@ def test_local_data_erase_resets_sync_engine_state(client):
         def fetch_problem_list_page(self, skip, limit):
             return {"total": 0, "problems": []}
 
-    assert api_module._sync_engine.run_blocking(TinyAdapter()) is None
-    before = api_module._sync_engine.progress()
+    assert state.sync_engine.run_blocking(TinyAdapter()) is None
+    before = state.sync_engine.progress()
     assert before["started_at"] is not None
 
     response = client.delete("/api/local-data", headers=ORIGIN)
     assert response.status_code == 200
 
-    after = api_module._sync_engine.progress()
+    after = state.sync_engine.progress()
     assert after["started_at"] is None
     assert after["finished_at"] is None
     assert after["resumable"] is False
@@ -514,7 +519,7 @@ def test_local_data_erase_resets_sync_engine_state(client):
 def test_template_defaults_to_configured_language(client, monkeypatch):
     seed_config(default_language="python3")
     adapter = FakeAdapter(detail=DETAIL_FIXTURE)
-    monkeypatch.setattr(api_module, "create_adapter", lambda: adapter)
+    monkeypatch.setattr(state, "create_adapter", lambda: adapter)
     client.get("/api/problem/two-sum")
 
     response = client.get("/api/problem/two-sum/template")
@@ -569,11 +574,11 @@ def test_settings_llm_timeout_roundtrip_and_bounds(client):
 
 
 def test_mask_secret_short_values_stay_fully_masked():
-    assert api_module.mask_secret("") == ""
-    assert api_module.mask_secret("short") == "***"
+    assert mask_secret("") == ""
+    assert mask_secret("short") == "***"
     # 15 chars: revealing tail-4 would expose >25% of the entropy
-    assert api_module.mask_secret("x" * 15) == "***"
-    masked = api_module.mask_secret("y" * 32)
+    assert mask_secret("x" * 15) == "***"
+    masked = mask_secret("y" * 32)
     assert masked.startswith("…")
     assert "yyyy" not in masked[:-1] or masked.endswith("yyyy")
 
@@ -583,13 +588,13 @@ def test_open_problem_regenerates_stale_statement_once(client, monkeypatch):
     converter kept rendering literal "**" garbage forever. Opening the problem
     online now regenerates it exactly once (meta statement_version gate)."""
     adapter = FakeAdapter(detail=DETAIL_FIXTURE)
-    monkeypatch.setattr(api_module, "create_adapter", lambda: adapter)
+    monkeypatch.setattr(state, "create_adapter", lambda: adapter)
     client.get("/api/problem/two-sum")
 
-    directory = api_module.problems.find_problem_dir(api_module._workspace_root(), "two-sum")
-    meta = api_module.problems.load_meta(directory)
+    directory = workspace.find_problem_dir(state.workspace_root(), "two-sum")
+    meta = workspace.load_meta(directory)
     meta["statement_version"] = 1
-    api_module.problems.save_meta(directory, meta)
+    workspace.save_meta(directory, meta)
     (directory / "statement.md").write_text("**旧版**损坏题面", encoding="utf-8")
 
     second = client.get("/api/problem/two-sum")
@@ -597,7 +602,7 @@ def test_open_problem_regenerates_stale_statement_once(client, monkeypatch):
     detail_calls = [c for c in adapter.calls if c[0] == "detail"]
     assert len(detail_calls) == 2  # refetched exactly once for the upgrade
     assert "题面内容" in (directory / "statement.md").read_text(encoding="utf-8")
-    assert api_module.problems.statement_up_to_date(directory)
+    assert workspace.statement_up_to_date(directory)
 
     client.get("/api/problem/two-sum")
     detail_calls = [c for c in adapter.calls if c[0] == "detail"]
@@ -610,13 +615,13 @@ def test_open_problem_keeps_stale_statement_when_offline(client, monkeypatch):
     from lc.exceptions import NetworkError
 
     adapter = FakeAdapter(detail=DETAIL_FIXTURE)
-    monkeypatch.setattr(api_module, "create_adapter", lambda: adapter)
+    monkeypatch.setattr(state, "create_adapter", lambda: adapter)
     client.get("/api/problem/two-sum")
 
-    directory = api_module.problems.find_problem_dir(api_module._workspace_root(), "two-sum")
-    meta = api_module.problems.load_meta(directory)
+    directory = workspace.find_problem_dir(state.workspace_root(), "two-sum")
+    meta = workspace.load_meta(directory)
     meta["statement_version"] = 1
-    api_module.problems.save_meta(directory, meta)
+    workspace.save_meta(directory, meta)
     (directory / "statement.md").write_text("旧题面", encoding="utf-8")
 
     def offline(slug):
@@ -626,3 +631,44 @@ def test_open_problem_keeps_stale_statement_when_offline(client, monkeypatch):
     response = client.get("/api/problem/two-sum")
     assert response.status_code == 200
     assert "旧题面" in (directory / "statement.md").read_text(encoding="utf-8")
+
+
+# ---------------------------------------------------------------------------
+# error protocol: status mapping, Retry-After, message_key transport
+
+
+def test_rate_limit_error_maps_to_429_with_retry_after_header(client, monkeypatch):
+    def boom(cookie):
+        raise RateLimitError("slow down", retry_after=12.0, detail={"context": "validate"})
+
+    monkeypatch.setattr(state, "validate_cookie_standalone", boom)
+    response = client.post(
+        "/api/setup/validate-cookie", json={"cookie": "x"}, headers=ORIGIN
+    )
+    assert response.status_code == 429
+    assert response.headers["Retry-After"] == "12"
+
+
+def test_daily_endpoint_requires_configuration(client):
+    """The happy path had coverage; the unconfigured 400 never did. The
+    reply must carry the message_key so the UI language, not the backend
+    process locale, decides the wording."""
+    response = client.get("/api/daily")
+    assert response.status_code == 400
+    assert response.json()["error"]["message_key"] == "cookie_missing"
+
+
+# ---------------------------------------------------------------------------
+# status payload drives the AI gate
+
+
+def test_status_exposes_llm_configured(client):
+    body = client.get("/api/status").json()
+    assert body["llm_configured"] is False
+
+    seed = dict(config.DEFAULTS)
+    seed["llm_api_key"] = "sk-abcdef123456"
+    seed["llm_base_url"] = "https://api.x.com/v1"
+    config.save(seed)
+    body = client.get("/api/status").json()
+    assert body["llm_configured"] is True

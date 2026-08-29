@@ -27,6 +27,7 @@ from lc.exceptions import (
 )
 from lc.i18n import t
 from lc.sites.base import SiteAdapter
+from lc.validate import is_safe_slug
 
 USER_STATUS_QUERY = """
 query userStatusInfo {
@@ -347,13 +348,10 @@ def normalize_tag(raw) -> dict:
     }
 
 
-_SAFE_SLUG_RE = re.compile(r"[A-Za-z0-9_-]+")
-
-
 def require_safe_slug(slug) -> str:
     """Reject slugs that could escape the workspace when used as path parts."""
     value = str(slug or "")
-    if not _SAFE_SLUG_RE.fullmatch(value):
+    if not is_safe_slug(value):
         raise NetworkError(f"unsafe titleSlug: {value[:80]!r}", detail={"slug": value[:80]})
     return value
 

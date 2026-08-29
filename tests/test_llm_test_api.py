@@ -3,7 +3,8 @@ from fastapi.testclient import TestClient
 
 import lc.auth as auth
 from lc.exceptions import NetworkError
-from server import api as api_module
+from server import app as app_module, state
+from server.routers import settings as settings_module
 
 ORIGIN = {"Origin": "http://localhost:5173"}
 
@@ -14,15 +15,15 @@ def isolated_env(tmp_path, monkeypatch):
     home.mkdir()
     monkeypatch.setenv("ALGOCOACH_HOME", str(home))
     auth.reset_state()
-    api_module.reset_app_state()
+    state.reset_app_state()
     yield
     auth.reset_state()
-    api_module.reset_app_state()
+    state.reset_app_state()
 
 
 @pytest.fixture
 def client():
-    return TestClient(api_module.app, base_url="http://127.0.0.1:8000")
+    return TestClient(app_module.app, base_url="http://127.0.0.1:8000")
 
 
 def seed_config_llm(monkeypatch=None, **extra):
@@ -68,12 +69,12 @@ def reset_fake_llm():
 def test_llm_test_requires_config(client):
     response = client.post("/api/llm/test", json={}, headers=ORIGIN)
     assert response.status_code == 400
-    assert response.json()["detail"]["message_key"] == "ask_not_configured"
+    assert response.json()["error"]["message_key"] == "ask_not_configured"
 
 
 def test_llm_test_ok_with_saved_config(client, monkeypatch):
     seed_config_llm()
-    monkeypatch.setattr(api_module, "LLMClient", lambda **kwargs: FakeLLM(**kwargs))
+    monkeypatch.setattr(settings_module, "LLMClient", lambda **kwargs: FakeLLM(**kwargs))
 
     response = client.post("/api/llm/test", json={}, headers=ORIGIN)
     assert response.status_code == 200
@@ -89,7 +90,7 @@ def test_llm_test_ok_with_saved_config(client, monkeypatch):
 
 def test_llm_test_payload_overrides_saved(client, monkeypatch):
     seed_config_llm()
-    monkeypatch.setattr(api_module, "LLMClient", lambda **kwargs: FakeLLM(**kwargs))
+    monkeypatch.setattr(settings_module, "LLMClient", lambda **kwargs: FakeLLM(**kwargs))
 
     response = client.post(
         "/api/llm/test",
@@ -108,7 +109,7 @@ def test_llm_test_payload_overrides_saved(client, monkeypatch):
 
 def test_llm_test_partial_override_falls_back_to_saved(client, monkeypatch):
     seed_config_llm(llm_model="saved-model")
-    monkeypatch.setattr(api_module, "LLMClient", lambda **kwargs: FakeLLM(**kwargs))
+    monkeypatch.setattr(settings_module, "LLMClient", lambda **kwargs: FakeLLM(**kwargs))
 
     response = client.post(
         "/api/llm/test",
@@ -124,7 +125,7 @@ def test_llm_test_partial_override_falls_back_to_saved(client, monkeypatch):
 
 def test_llm_test_translates_network_error(client, monkeypatch):
     seed_config_llm()
-    monkeypatch.setattr(api_module, "LLMClient", lambda **kwargs: FakeLLM(**kwargs))
+    monkeypatch.setattr(settings_module, "LLMClient", lambda **kwargs: FakeLLM(**kwargs))
 
     def boom(self, messages, *, max_tokens=None):
         raise NetworkError("LLM HTTP 401: bad key")
@@ -140,7 +141,7 @@ def test_llm_test_translates_network_error(client, monkeypatch):
 
 def test_llm_test_passes_thinking_override(client, monkeypatch):
     seed_config_llm()
-    monkeypatch.setattr(api_module, "LLMClient", lambda **kwargs: FakeLLM(**kwargs))
+    monkeypatch.setattr(settings_module, "LLMClient", lambda **kwargs: FakeLLM(**kwargs))
 
     response = client.post("/api/llm/test", json={"llm_thinking": "high"}, headers=ORIGIN)
     assert response.status_code == 200

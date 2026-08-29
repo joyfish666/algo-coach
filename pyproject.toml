@@ -46,7 +46,7 @@ Changelog = "https://github.com/joyfish666/algo-coach/blob/main/CHANGELOG.md"
 coach = "cli:main"
 
 [tool.setuptools]
-packages = ["lc", "lc.sites", "server"]
+packages = ["lc", "lc.sites", "server", "server.routers"]
 py-modules = ["cli"]
 
 [tool.setuptools.package-data]

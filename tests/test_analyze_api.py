@@ -4,7 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import lc.auth as auth
-from server import api as api_module
+from server import app as app_module, state
 
 
 ORIGIN = {"Origin": "http://localhost:5173"}
@@ -34,15 +34,15 @@ def isolated_env(tmp_path, monkeypatch):
     home.mkdir()
     monkeypatch.setenv("ALGOCOACH_HOME", str(home))
     auth.reset_state()
-    api_module.reset_app_state()
+    state.reset_app_state()
     yield
     auth.reset_state()
-    api_module.reset_app_state()
+    state.reset_app_state()
 
 
 @pytest.fixture
 def client():
-    return TestClient(api_module.app, base_url="http://127.0.0.1:8000")
+    return TestClient(app_module.app, base_url="http://127.0.0.1:8000")
 
 
 def seed_cache(rows=None):
@@ -72,7 +72,7 @@ def seed_cache(rows=None):
 
 def test_analyze_stats_without_llm(client):
     seed_cache()
-    archive = api_module.get_archive()
+    archive = state.get_archive()
     archive.append({
         "schema": 1, "timestamp": "2026-08-23T00:00:01+00:00", "slug": "two-sum",
         "frontend_id": "1", "submission_id": "1", "lang": "cpp", "status": "wrong_answer",
@@ -139,7 +139,7 @@ def test_ask_requires_llm_configured(client):
         headers=ORIGIN,
     )
     assert response.status_code == 400
-    assert response.json()["detail"]["message_key"] == "ask_not_configured"
+    assert response.json()["error"]["message_key"] == "ask_not_configured"
 
 
 def test_ask_includes_problem_and_verdict_context(client, monkeypatch):
@@ -153,9 +153,9 @@ def test_ask_includes_problem_and_verdict_context(client, monkeypatch):
             FakeLLM.captured = messages
             return "答案"
 
-    monkeypatch.setattr(api_module, "_build_llm", lambda: FakeLLM())
+    monkeypatch.setattr(state, "build_llm", lambda: FakeLLM())
 
-    archive = api_module.get_archive()
+    archive = state.get_archive()
     archive.append({
         "schema": 1, "timestamp": "2026-08-23T00:00:02+00:00", "slug": "two-sum",
         "frontend_id": "1", "submission_id": "2", "lang": "cpp", "status": "accepted",
@@ -202,7 +202,7 @@ def test_ask_trims_history_to_twelve(client, monkeypatch):
             FakeLLM.captured = messages
             return "ok"
 
-    monkeypatch.setattr(api_module, "_build_llm", lambda: FakeLLM())
+    monkeypatch.setattr(state, "build_llm", lambda: FakeLLM())
     history = [
         {"role": "user" if i % 2 == 0 else "assistant", "content": f"msg{i}"}
         for i in range(20)
@@ -228,7 +228,7 @@ def test_ask_system_prompt_follows_ui_lang(client, monkeypatch):
             FakeLLM.captured = messages
             return "ok"
 
-    monkeypatch.setattr(api_module, "_build_llm", lambda: FakeLLM())
+    monkeypatch.setattr(state, "build_llm", lambda: FakeLLM())
 
     client.post(
         "/api/ask",
@@ -270,7 +270,7 @@ def test_analyze_generates_ai_report_with_saved_config(client, monkeypatch):
     coverage - the whole AI report feature was regression-blind."""
     seed_cache()
     seed_config_llm(monkeypatch)
-    monkeypatch.setattr(api_module, "_build_llm", lambda: FakeReportLLM())
+    monkeypatch.setattr(state, "build_llm", lambda: FakeReportLLM())
 
     response = client.post(
         "/api/analyze", json={"use_llm": True}, headers=ORIGIN
@@ -290,7 +290,7 @@ def test_analyze_generates_ai_report_with_saved_config(client, monkeypatch):
 def test_analyze_ai_report_language_follows_ui_lang(client, monkeypatch):
     seed_cache()
     seed_config_llm(monkeypatch)
-    monkeypatch.setattr(api_module, "_build_llm", lambda: FakeReportLLM())
+    monkeypatch.setattr(state, "build_llm", lambda: FakeReportLLM())
 
     response = client.post(
         "/api/analyze", json={"use_llm": True, "ui_lang": "en"}, headers=ORIGIN
@@ -320,7 +320,7 @@ def test_analyze_ai_report_failure_degrades_to_none(client, monkeypatch):
         def chat(self, messages):
             raise NetworkError("LLM HTTP 500: boom")
 
-    monkeypatch.setattr(api_module, "_build_llm", lambda: FailingLLM())
+    monkeypatch.setattr(state, "build_llm", lambda: FailingLLM())
 
     response = client.post(
         "/api/analyze", json={"use_llm": True}, headers=ORIGIN
@@ -342,7 +342,7 @@ def test_import_site_dedupes_by_submission_id(client, monkeypatch):
          "title_cn": "", "title_en": "", "status": "Wrong Answer", "lang": "cpp",
          "timestamp": "1755900100"},
     ]
-    monkeypatch.setattr(api_module, "create_adapter", lambda: FakeImportAdapter(items))
+    monkeypatch.setattr(state, "create_adapter", lambda: FakeImportAdapter(items))
 
     first = client.post("/api/archive/import-site", json={"limit": 20}, headers=ORIGIN)
     assert first.status_code == 200
@@ -374,7 +374,7 @@ def test_import_site_appends_in_chronological_order(client, monkeypatch):
          "title_cn": "", "title_en": "", "status": "Wrong Answer", "lang": "cpp",
          "timestamp": "1755900000"},
     ]
-    monkeypatch.setattr(api_module, "create_adapter", lambda: FakeImportAdapter(items))
+    monkeypatch.setattr(state, "create_adapter", lambda: FakeImportAdapter(items))
 
     response = client.post("/api/archive/import-site", json={"limit": 20}, headers=ORIGIN)
     assert response.status_code == 200
@@ -393,7 +393,7 @@ def test_import_site_appends_in_chronological_order(client, monkeypatch):
 
 
 def test_archive_recent_respects_limit(client):
-    archive = api_module.get_archive()
+    archive = state.get_archive()
     for i in range(6):
         archive.append({
             "schema": 1, "timestamp": f"2026-08-23T00:00:0{i}+00:00", "slug": f"p{i}",

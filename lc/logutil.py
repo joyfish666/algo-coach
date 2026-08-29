@@ -18,8 +18,6 @@ REDACTED_PLACEHOLDER = "<redacted>"
 LOG_MAX_BYTES = 1_000_000
 LOG_BACKUP_COUNT = 1
 
-_configured = False
-
 
 def redact_headers(headers) -> dict:
     return {
@@ -50,7 +48,6 @@ def redact_mapping(payload: dict, fields=None) -> dict:
 
 
 def setup_logging(debug: bool = False, log_file=None) -> None:
-    global _configured
     level = logging.DEBUG if debug else logging.INFO
     formatter = logging.Formatter(
         "%(asctime)s %(levelname)-7s %(name)s: %(message)s",
@@ -71,8 +68,3 @@ def setup_logging(debug: bool = False, log_file=None) -> None:
         )
         file_handler.setFormatter(formatter)
         logger.addHandler(file_handler)
-    _configured = True
-
-
-def is_configured() -> bool:
-    return _configured

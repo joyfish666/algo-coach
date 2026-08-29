@@ -141,3 +141,15 @@ def test_dump_toml_escapes_specials():
     if config._toml_reader is not None:
         parsed = config._toml_reader.loads(text)
         assert parsed["cookie"] == 'a"b\\c\nd'
+
+
+def test_validate_environment_enforces_range_bounds(monkeypatch):
+    monkeypatch.setenv("ALGOCOACH_REQUEST_INTERVAL", "0.01")
+    with pytest.raises(ValueError) as exc_info:
+        config.validate_environment()
+    assert "ALGOCOACH_REQUEST_INTERVAL" in str(exc_info.value)
+
+    monkeypatch.setenv("ALGOCOACH_REQUEST_INTERVAL", "2.0")
+    monkeypatch.setenv("ALGOCOACH_LLM_TIMEOUT", "0")
+    with pytest.raises(ValueError):
+        config.validate_environment()

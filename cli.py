@@ -36,7 +36,6 @@ import lc
 from lc.config import INSTANCE_LOCK_NAME, app_dir
 from lc.logutil import setup_logging
 
-LOCK_FILE_NAME = INSTANCE_LOCK_NAME
 LOG_FILE_NAME = "coach.log"
 STILL_ACTIVE = 259
 # how long acquire_instance_lock tolerates a lock file that exists but does
@@ -45,7 +44,7 @@ _LOCK_GRACE_SECONDS = 2.0
 
 
 def lock_path():
-    return app_dir() / LOCK_FILE_NAME
+    return app_dir() / INSTANCE_LOCK_NAME
 
 
 def _pid_alive(pid: int) -> bool:
@@ -270,7 +269,7 @@ def main(argv=None):
 
     url = f"http://{host}:{port}"
     config = uvicorn.Config(
-        "server.api:app",
+        "server.app:app",
         host=host,
         port=port,
         log_level="debug" if args.debug else "info",

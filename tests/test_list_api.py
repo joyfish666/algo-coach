@@ -4,7 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import lc.auth as auth
-from server import api as api_module
+from server import app as app_module, state
 
 
 DETAIL_FIXTURE = {
@@ -47,13 +47,13 @@ def isolated_env(tmp_path, monkeypatch):
 
 @pytest.fixture
 def client():
-    return TestClient(api_module.app, base_url="http://127.0.0.1:8000")
+    return TestClient(app_module.app, base_url="http://127.0.0.1:8000")
 
 
 @pytest.fixture
 def adapter(client, monkeypatch):
     fake = FakeAdapter()
-    monkeypatch.setattr(api_module, "create_adapter", lambda: fake)
+    monkeypatch.setattr(state, "create_adapter", lambda: fake)
     return fake
 
 
@@ -116,7 +116,7 @@ def test_favorite_rejects_unsafe_slug(client):
 
 def test_open_problem_state_carries_favorite_flag(client, monkeypatch):
     seed_cache_row()
-    monkeypatch.setattr(api_module, "create_adapter", lambda: FakeAdapter())
+    monkeypatch.setattr(state, "create_adapter", lambda: FakeAdapter())
     assert client.get("/api/problem/two-sum").json()["favorite"] is False
     client.put("/api/problem/two-sum/favorite", json={"favorite": True}, headers=ORIGIN)
     assert client.get("/api/problem/two-sum").json()["favorite"] is True
@@ -128,15 +128,15 @@ def test_open_problem_state_carries_favorite_flag(client, monkeypatch):
 
 def test_notes_roundtrip_through_workspace(client, monkeypatch):
     seed_cache_row()
-    monkeypatch.setattr(api_module, "create_adapter", lambda: FakeAdapter())
+    monkeypatch.setattr(state, "create_adapter", lambda: FakeAdapter())
     client.get("/api/problem/two-sum")  # materialize workspace
 
     saved = client.put(
         "/api/problem/two-sum/notes", json={"content": "# 思路\n双指针"}, headers=ORIGIN
     )
     assert saved.status_code == 200
-    state = client.get("/api/problem/two-sum").json()
-    assert state["notes"] == "# 思路\n双指针"
+    problem_state = client.get("/api/problem/two-sum").json()
+    assert problem_state["notes"] == "# 思路\n双指针"
 
 
 def test_notes_on_unknown_problem_returns_404(client):
@@ -204,7 +204,7 @@ def test_ask_includes_editor_code_when_provided(client, monkeypatch):
     data = dict(config.DEFAULTS)
     data.update({"llm_api_key": "sk-test", "llm_base_url": "https://llm.example"})
     config.save(data)
-    monkeypatch.setattr(api_module, "LLMClient", lambda **kwargs: FakeLLM())
+    monkeypatch.setattr(state, "LLMClient", lambda **kwargs: FakeLLM())
 
     response = client.post(
         "/api/ask",
@@ -224,7 +224,7 @@ def test_ask_without_code_keeps_prompt_clean(client, monkeypatch):
     data.update({"llm_api_key": "sk-test", "llm_base_url": "https://llm.example"})
     config.save(data)
     FakeLLM.captured = None
-    monkeypatch.setattr(api_module, "LLMClient", lambda **kwargs: FakeLLM())
+    monkeypatch.setattr(state, "LLMClient", lambda **kwargs: FakeLLM())
 
     response = client.post(
         "/api/ask", json={"question": "hello"}, headers=ORIGIN

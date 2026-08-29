@@ -23,7 +23,7 @@ def test_status_endpoint(tmp_path, monkeypatch):
 
     from fastapi.testclient import TestClient
 
-    from server.api import app
+    from server.app import app
 
     client = TestClient(app, base_url="http://127.0.0.1:8000")
     response = client.get("/api/status")
