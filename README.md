@@ -3,59 +3,37 @@
 A local-first practice workbench for LeetCode China (leetcode.cn) with an AI learning coach.
 All data — cookies, configs, submission archives — stays on your machine. No cloud dependency.
 
-> **Status**: v0.1.0 feature scope fully delivered (live-regression verified, see the
-> [ROADMAP](docs/zh/ROADMAP.md)); pre-release review and hardening in progress.
+> **Status**: v0.1.0 delivered and live-verified (see the [ROADMAP](docs/zh/ROADMAP.md)).
 
 ## Features
 
-- Guided `/setup` wizard: paste your cookie, validate it instantly, set your preferences;
-  LLM configuration lives separately in Settings with a one-click connection test and a
-  thinking-mode control
-- Full problem-list sync with local caching and app-level progress feedback that survives page
-  switches and reloads; practice-status / difficulty / tag / keyword filters, random pick,
-  favorites and a compact density mode
-- Answering workbench: rendered statement, CodeMirror 6 editor with theme-aware syntax
-  highlighting, Run / Submit with rich verdicts (runtime/memory percentiles, WA case diff,
-  CE/RE details), per-problem notes and favorite stars; reopening a problem resumes at the
-  language you last used, with that code loaded
-- Submission history view over the local archive (expandable WA diff and CE/RE details,
-  filterable by problem)
-- Offline review: opened problems are materialized to local files you own
-- Daily problem shortcut; analytics dashboard with tag-mastery chart, recommendations and an AI
-  weakness report (bring your own key, one-click regeneration)
-- Stateless AI coach sidebar on every problem, aware of your latest verdict, with opt-in
-  attachment of the current editor code and a one-click clear-conversation button; replies
-  follow the interface language; without an LLM key it shows a setup hint instead of failing
-  per message
-- Local submission archive (JSON Lines) with site-side import; accepted status derived per problem
-- Bilingual UI (zh/en); light/dark design system with semantic success/warning/danger colors;
-  unified toast notifications (errors persist until dismissed); uniform frontend request timeouts
-
-## Installation
-
-Requires Python ≥ 3.10. Node.js ≥ 18 is only needed to build the frontend from source
-(release wheels will ship a pre-built frontend).
-
-```bash
-git clone https://github.com/joyfish666/algo-coach.git
-cd algo-coach
-pip install -e .
-cd web && npm install && npm run build && cd ..
-```
+- Guided `/setup` wizard (cookie + preferences); LLM configuration lives separately in
+  Settings with a one-click connection test and a thinking-mode control
+- Full problem-list sync (~4400 problems) with progress that survives page switches;
+  practice-status / difficulty / tag / keyword filters, random pick, favorites, density mode
+- Answering workbench: rendered statement, CodeMirror 6 editor, Run / Submit with rich
+  verdicts (WA case diff, CE/RE details, percentiles), per-problem notes and custom
+  testcases; reopening a problem resumes at the language you last used
+- Submission history and one-click site import over the local archive; offline review of
+  opened problems (materialized as local files you own)
+- Daily problem shortcut; analytics dashboard with tag-mastery chart, recommendations and
+  an AI weakness report; stateless AI coach sidebar on every problem (replies follow the
+  interface language, opt-in editor-code attachment)
+- Bilingual UI (zh/en); light/dark design system; uniform toasts and request timeouts
 
 ## Quick start
 
+Requires Python ≥ 3.10 (Node.js ≥ 18 only to build the frontend from source):
+
 ```bash
+git clone https://github.com/joyfish666/algo-coach.git
+cd algo-coach && pip install -e .
+cd web && npm install && npm run build && cd ..
 coach
 ```
 
-The server binds to `127.0.0.1` only (default port `8000`, auto-incremented when occupied),
-prints the final URL in a banner, and opens your browser as soon as it is ready — the built
-frontend is served straight from the package, no Node needed at runtime.
-First launch guides you through `/setup`.
-
-A single-instance guard refuses duplicate launches and points you at the running URL.
-
+`coach` binds to `127.0.0.1` only (default port 8000, auto-incremented), opens your browser
+when ready, and refuses a second instance. First launch guides you through `/setup`.
 Options: `--port`, `--no-browser`, `--debug`.
 
 ## Privacy model
@@ -66,33 +44,21 @@ to leetcode.cn itself (and to whichever LLM endpoint you configure yourself).
 
 ## Documentation
 
-- [中文文档](docs/zh/)：USAGE · DEVELOPMENT · ARCHITECTURE · ROADMAP · PITFALLS
-- English docs are planned for v1.x (see [ROADMAP](docs/zh/ROADMAP.md))
+中文文档为权威（English summary below）：
 
-## Development Rules
-
-All human developers and AI agents must follow these rules:
-
-1. **Fix bugs at the root cause.** Symptom-hiding patches are forbidden; PRs must include a
-   root-cause analysis.
-2. **Read [docs/zh/PITFALLS.md](docs/zh/PITFALLS.md) before developing**; every newly solved
-   pitfall must be recorded back into that file.
-3. **Dependency policy:** only general-purpose foundational libraries are allowed — backend
-   `requests` / `fastapi` / `uvicorn` / `rich`; frontend `vue` / `vite` / `pinia` /
-   `vue-router` / `codemirror` plus official CodeMirror packages (language packs such as
-   `@codemirror/lang-cpp`, and `@lezer/highlight` for syntax highlighting) and `markdown-it`
-   (statement rendering, HTML escaped by default).
-   Copying code from any existing LeetCode-related project is strictly forbidden — all business
-   logic must be original.
-4. **Documentation policy:** the README must stay synchronized in both English and Chinese;
-   every change under `docs/` must be registered in the ROADMAP.
-
-Welcome in any form of contribution — issues or PRs, no matter how small!
-欢迎任何形式的贡献！无论是提出问题（issues）还是提交代码（pull requests），再小的毛病、再小的改动都欢迎。
+- [使用手册 USAGE](docs/zh/USAGE.md)（安装/启动/页面/报错对照）·
+  [English quick guide](docs/en/USAGE.md)
+- [开发环境 DEVELOPMENT](docs/zh/DEVELOPMENT.md) ·
+  [系统架构 ARCHITECTURE](docs/zh/ARCHITECTURE.md)（含 REST 契约）
+- [实现陷阱 PITFALLS](docs/zh/PITFALLS.md) · [ROADMAP](docs/zh/ROADMAP.md) ·
+  [CHANGELOG](CHANGELOG.md)
+- Contribution rules: [CONTRIBUTING.md](CONTRIBUTING.md)
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md) — root-cause-first bug fixes, a minimal-dependency
+policy and bilingual doc sync are spelled out there. Issues and PRs of any size are welcome;
+欢迎任何形式的贡献，再小的改动都欢迎。
 
 ## License
 

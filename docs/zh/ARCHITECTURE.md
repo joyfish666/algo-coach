@@ -1,18 +1,37 @@
 # ARCHITECTURE
 
-## 三层架构
+## 分层架构
 
 ```
-web (Vue 3 SPA)  ↔  server/api.py (FastAPI 薄封装)  ↔  lc (核心业务层)  ↔  sites/cn.py (leetcode.cn 适配)
+web (Vue 3 SPA)  ↔  server (FastAPI 传输层)  ↔  lc (核心业务层)  ↔  lc/sites/cn.py (leetcode.cn 适配)
 ```
 
 - **web/**：Vue 3 + Vite + Pinia + Vue Router + CodeMirror 6（语法高亮经 @lezer/highlight
   双调色板随 data-theme 切换）；构建产物 `web/dist` 由 FastAPI 静态托管；开发模式 Vite :5173
   proxy `/api` → :8000。全局通知走 toast store（成功自动消退、错误驻留至手动关闭）；
   同步轮询由应用级 sync store 持有，跨路由存活、页面刷新后自动重新接管进行中的后端同步；
-  判定文案/语义色由共享 utils/verdict.js 单点映射（工作台结果面板与历史页共用）。
-- **server/api.py**：REST 层。领域异常与带 i18n 键的 HTTPException（统一经 `http_domain_error()`）都翻译为携带 `message_key` 的结构化错误 JSON，前端据此按 UI 语言渲染；SPA catch-all 回退 index.html（`relative_to` 严格限制在 dist 内；资源形态路径未命中一律 404，防止旧标签页的哈希 chunk 被改写成 HTML）；Host（含 IPv6 括号格式）/ Origin 校验中间件——写方法要求白名单本地 Origin（含 Vite dev 来源 `http://localhost:5173`），GET 免 Origin 但 Host 必须本地（防 DNS rebinding），`{qid}` 入口统一做 slug 字符白名单校验；带阻塞网络 IO 的长端点一律普通 def 走线程池。config.toml 的全部写者经 `lc.config.update_lock()` 串行化。
-- **lc/**：与 UI 框架解耦的核心业务层：config / auth / httpclient / exceptions / logutil / i18n / langs / problems / judge / archive / favorites / llm / atomicio（跨平台原子写：tmp + os.replace，Windows 上对并发读者造成的 sharing violation 做有界重试；config/favorites/题库缓存/工作区文件的唯一写盘通道）。
+  错误文案/难度 chip/判定文案/Markdown 渲染/localStorage 键名均由共享工具单点维护
+  （utils/verdict.js · difficulty.js · errors.js · markdown.js · storage.js）。
+- **server/**：REST 传输层，按职责分模块——
+  `app.py`（组合根：Origin/Host 守卫中间件、异常处理器、dist 托管与 SPA 回退）、
+  `errors.py`（统一错误 envelope 与状态码映射）、`state.py`（进程级单例与按配置派生的
+  工厂，也是测试的统一 patch 点）、`routers/`（settings 状态/设置/LLM 探测、
+  problems 题库/工作台/判题、coach AI 问答与分析、archive 归档/导入/清除）。
+  所有错误响应使用单一 envelope `{"error": {kind, message_key, message, detail?}}`：
+  领域异常与带 i18n 键的 HTTPException（经 `http_domain_error()`）都携带 `message_key`，
+  前端据此按 UI 语言渲染；SPA catch-all 回退 index.html（`relative_to` 严格限制在 dist 内；
+  资源形态路径未命中一律 404，防止旧标签页的哈希 chunk 被改写成 HTML）；Host（含 IPv6
+  括号格式）/ Origin 校验——写方法要求白名单本地 Origin（含 Vite dev 来源
+  `http://localhost:5173`），GET 免 Origin 但 Host 必须本地（防 DNS rebinding），
+  `{qid}` 入口统一经 `lc.validate.is_safe_slug` 白名单校验；带阻塞网络 IO 的长端点
+  一律普通 def 走线程池。config.toml 的全部写者经 `lc.config.update_lock()` 串行化。
+- **lc/**：与 UI 框架解耦的核心业务层——config（配置+锁+env 校验）/ auth / httpclient /
+  exceptions / logutil / i18n / langs / problems（题库缓存+同步引擎）/ workspace
+  （每题工作区物化，含 STATEMENT_VERSION 版本契约）/ htmltomd（题面 HTML→Markdown
+  转换器）/ coach（AI 提示词工程，纯逻辑）/ clock / validate / judge / archive /
+  favorites / llm / atomicio（跨平台原子写：tmp + os.replace，Windows 上对并发读者
+  造成的 sharing violation 做有界重试；config/favorites/题库缓存/工作区文件的唯一
+  写盘通道）。
 - **sites/cn.py**：所有 GraphQL 响应解析单点收口，字段缺失降级为清晰报错而非崩溃。
 - **SiteAdapter 抽象**（sites/base.py）：最小接口，只为 cn 实现；leetcode.com 待需求验证。
 
@@ -125,7 +144,5 @@ GET  /{path}                        前端托管：命中 dist 文件直出，SP
 
 ## 已知能力边界
 
-- 站内提交列表（submissionList）仅能取最近约 20 条。
-- v0.1 题面公式原文展示、图片断网失效（见 ROADMAP）。
-- 调试运行（interpret_solution）偶发站点侧 Internal Error，属 leetcode.cn
-  调试服务不稳定；前端会显示「调试服务暂不可用」提示，稍后重试即可。
+见 [PITFALLS「已知限制」](PITFALLS.md)——该清单在那里单点维护（连同全部实现陷阱），
+此处不再复制，避免两份各自漂移。

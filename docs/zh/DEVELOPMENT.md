@@ -87,8 +87,8 @@ shell 片段——拷贝步骤只写在文档里时，漏拷会发出 UI-less wh
 CI 的 package job 会构建 wheel 并断言其中含 `server/webdist/index.html`）。
 
 `server/webdist/` 为构建产物（已 gitignore），打包时经 package-data 进入 wheel；
-运行期 dist 解析链：`ALGOCOACH_DIST` 环境变量 → 仓库 `web/dist` → 安装目录内
-`server/webdist`，均未命中则进入 API-only 模式。
+运行期 dist 解析链与单实例守卫的完整机制在
+[ARCHITECTURE「前端托管与单实例」](ARCHITECTURE.md) 单点维护，此处不再复制。
 
 验收命令（模拟用户安装态）：
 
@@ -101,8 +101,6 @@ curl http://127.0.0.1:8000/settings  # SPA 深链应同样返回页面
 
 ## 单实例守卫
 
-`coach` 通过 `~/.algocoach/instance.lock`（O_CREAT|O_EXCL 原子创建，记录 PID+端口）
-保证全局单实例：存活实例拒绝重复启动并打印其地址；崩溃残留锁自动接管（O_EXCL 创建与
-写入 payload 之间的零字节窗口有短宽限期，不会把赢家的锁误判成陈旧锁）；退出时仅当锁内
-pid 是自己才删除（防止删掉接管者的锁）。首选端口被占用时先探测 `/api/status`——是
-coach 则拒启，是其他程序才顺延端口。
+`coach` 全局只允许一个实例（锁文件 + PID 存活探测 + 端口探测 + 预绑定 socket）。
+机制的完整描述在 [ARCHITECTURE「前端托管与单实例」](ARCHITECTURE.md)，
+日常开发只需知道：重复启动会拒绝并打印运行中实例的地址；崩溃残留锁自动接管。

@@ -123,13 +123,15 @@
   错误文本直接渲染进中文界面。`tests/test_i18n.py` 的平价测试保证后端 catalog ⊆ 前端
   两个 locale 块；`check:i18n` 对「提取到 0 键」fail-loud（目录形状重构后正则失效会
   静默全绿）。另外 `HTTPException(detail=t(key))` 曾整体绕过 message_key 机制——
-  带 i18n 键的 HTTPException 一律走 `http_domain_error()`，前端识别 `detail.message_key`。
+  带 i18n 键的 HTTPException 一律走 `http_domain_error()`；现在所有错误响应统一为
+  单一 envelope `{"error": {...}}`（见 server/errors.py），前端只识别 `error.message_key`。
 - **Vue watcher 异步 flush 会让「先赋值后改」的守卫失效**（2026-08-28 已修复，最高危）：
   watcher 回调执行时读到的是整段同步代码跑完后的状态。工作台 `loadProblem` 先赋
   `problem.value` 再改 `lang.value`，`!problem.value` 守卫在回调时点已失效——挂载/切题
   被当成「用户切换语言」，把刚加载的代码用旧语言 PUT 覆盖无关题目的文件，再用模板覆写
-  编辑器。程序化赋值（加载/模板应用/切换失败回退）必须用**跨 nextTick 的栅栏标志**抑制
-  watcher，`finally` 里 `await nextTick()` 后才能解除。测试要跨一个 macrotask 断言
+  编辑器。程序化赋值（加载/模板应用/切换失败回退）必须用**跨 nextTick 的程序化写入栅栏**
+  抑制 watcher，`finally` 里 `await nextTick()` 后才能解除。测试断言「未发生 PUT」时
+  必须等待一个 macrotask（如 `setTimeout`）再查
   「未发生 PUT」，只 flushPromises 抓不到异步 flush 的 watcher。
 - **错误文案语言以 UI 语言为准**：服务端错误 payload 只保证 `message_key` 稳定，`message`
   文本跟随后端进程 locale；前端必须在 api 层集中按 message_key 翻译后再展示，
