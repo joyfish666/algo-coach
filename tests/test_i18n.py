@@ -86,3 +86,29 @@ def test_frontend_catalog_blocks_were_actually_extracted():
     test above vacuously pass. Anchor the guard with a known key."""
     for locale in ("zh", "en"):
         assert "cookie_invalid" in _frontend_catalog_keys(locale)
+
+
+def test_backend_message_keys_are_actually_raised():
+    """Mirror of the frontend check:i18n reverse guard: a catalog entry no
+    error path ever raises is dead copy that drifts silently
+    (not_configured / action_retry / action_relogin once shipped unused).
+    Every key must appear as a quoted literal somewhere in lc/ or server/
+    source - a t("key") raise site or a message_key alias."""
+    import re
+    from pathlib import Path
+
+    repo_root = Path(__file__).resolve().parents[1]
+    source = ""
+    for base in (repo_root / "lc", repo_root / "server"):
+        for path in sorted(base.rglob("*.py")):
+            if path.name == "i18n.py":
+                continue
+            source += path.read_text(encoding="utf-8")
+
+    for locale, table in i18n.MESSAGES.items():
+        for key in table:
+            assert re.search(rf"[\"']{key}[\"']", source), (
+                f"backend message key {key!r} ({locale}) is never raised "
+                "anywhere - remove it from lc/i18n.py or wire it into an "
+                "error path"
+            )

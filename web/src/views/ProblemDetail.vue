@@ -706,6 +706,7 @@ onBeforeUnmount(() => {
         v-if="problem && problem.supported !== false"
         :qid="problem.slug || props.qid"
         :get-code="() => code"
+        :code-lang="lang"
       />
   </section>
 </template>

@@ -147,6 +147,16 @@
 | 文档 | PITFALLS 存在两个内容漂移的重复「前端与服务」章节（并集合并为一份） | 历史批次往不同副本各追加了条目，且从未去重 |
 
 
+### 第七批（用户/开发者双视角体检，2026-08-29）
+
+| 类别 | 交付/修复 | 根因 |
+|---|---|---|
+| 功能 | AI 教练回复与 AI 薄弱点报告跟随界面语言：`/api/ask`、`/api/analyze` 新增 `ui_lang`，系统提示词、上下文标签（题目/判定/代码）、分析摘要与指令全部按语言出稿；未知值回退 zh | 系统提示词是硬编码中文常量，端点无从得知 UI 语言——应用交付了双语界面，英文用户却永远收到中文回答；前端 api 层统一附带 i18n store 语言 |
+| 功能 | AI 面板「附带当前代码」携带编辑器语言（上下文显示 `当前代码（python3）:` 而非 `(text)`） | 侧边栏契约早于语言感知：`lang` 恒为 null，ProblemDetail 明知编辑器语言却传不进去 → 新增 `codeLang` prop |
+| 逻辑 | i18n catalog 清理 9 个死键 ×2 locale（`setup_body` 仍声称向导「后续版本提供，先用 API」与已交付的向导直接矛盾，另有 `coming_soon`/`goto_problems`/`skip`/`load_failed`/`analyze_ai_none`/`problems_sync`/`not_configured`/`action_retry`）；后端 `lc/i18n.py` 清理 3 个从未发送的 message_key（`not_configured`/`action_retry`/`action_relogin`） | catalog 只增不删：功能演进后旧键无人回收，误导性死文案随时可能被复用或误译 |
+| 测试 | `check:i18n` 从单向校验升级为双向守卫：新增「死键」检查——catalog 键必须可达（字面 `t()` 调用、`titleKey/labelKey/key` 对象字面量、声明的动态键族 `verdict_`/`diff_`、`lc/i18n.py` 解析出的服务端驱动键四来源之一）；`tests/test_i18n.py` 新增后端镜像护栏（每个 message_key 必须在 lc/ 或 server/ 源码中被真实 raise） | 原 check 只查 used ⊆ catalog 单向，死键永不失败——这正是死键能滞留至今的机制本身；反向检查首跑即抓到人工清点漏掉的 `skip` |
+| 测试 | 补齐 `/api/analyze` AI 报告生成路径（use_llm=true：摘要构建、报告返回、`NetworkError` 降级为 `ai_report:null` 且 `ai_configured` 不翻转）零覆盖缺口；ask/analyze 的 `ui_lang` 前后端各配用例（后端 251→256，前端 98→100） | 报告生成路径自第三批落地起无任何测试：该功能处于回归盲区 |
+
 ### 登记【延】
 
 - **浏览器级 E2E（Playwright 等）**：当前以路由 smoke（全部懒加载 chunk 可解析 +

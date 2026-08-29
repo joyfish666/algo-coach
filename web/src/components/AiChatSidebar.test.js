@@ -17,9 +17,9 @@ import AiChatSidebar from './AiChatSidebar.vue'
 
 let pinia
 
-function mountPanel(qid = 'two-sum') {
+function mountPanel(qid = 'two-sum', extraProps = {}) {
   return mount(AiChatSidebar, {
-    props: { qid },
+    props: { qid, ...extraProps },
     global: {
       plugins: [pinia],
       stubs: { RouterLink: { template: '<a><slot/></a>' } },
@@ -203,6 +203,22 @@ describe('ai chat sidebar', () => {
     expect(bubbles[0].text()).toContain('**')
     // history fed back to the LLM keeps the raw markdown text, not the html
     expect(askMock.mock.calls[0][0].question).toBe('my **draft** stays')
+    wrapper.unmount()
+  })
+
+  it('labels the attached-code language instead of the old null', async () => {
+    // the editor language is known here; sending it lets the backend phrase
+    // the context as "Current code (python3):" instead of "(text)".
+    // ui_lang itself is attached in the api layer and asserted in api.test.js
+    askMock.mockResolvedValue({ answer: 'ok' })
+    const wrapper = mountPanel('two-sum', { codeLang: 'python3' })
+    await wrapper.find('[data-testid="ai-open"]').trigger('click')
+
+    await wrapper.find('textarea').setValue('why TLE?')
+    await wrapper.find('button.btn-primary').trigger('click')
+    await flushPromises()
+
+    expect(askMock.mock.calls[0][0].lang).toBe('python3')
     wrapper.unmount()
   })
 })

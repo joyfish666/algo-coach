@@ -25,6 +25,17 @@ function translateMessageKey(key) {
   }
 }
 
+// ask/analyze attach the UI language so the backend phrases the coach's
+// system prompt and report digest to match - an en-locale user used to get
+// Chinese answers no matter which interface language they had picked
+function uiLang() {
+  try {
+    return useI18nStore().lang
+  } catch {
+    return undefined
+  }
+}
+
 async function handle(response) {
   if (!response.ok) {
     let payload = null
@@ -153,14 +164,14 @@ export const api = {
     request('/api/analyze', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+      body: JSON.stringify({ ui_lang: uiLang(), ...body }),
       timeoutMs: 150000,
     }),
   ask: (body) =>
     request('/api/ask', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+      body: JSON.stringify({ ui_lang: uiLang(), ...body }),
       timeoutMs: 150000,
     }),
   importSite: (limit = 20) =>

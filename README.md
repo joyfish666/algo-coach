@@ -24,8 +24,9 @@ All data — cookies, configs, submission archives — stays on your machine. No
 - Daily problem shortcut; analytics dashboard with tag-mastery chart, recommendations and an AI
   weakness report (bring your own key, one-click regeneration)
 - Stateless AI coach sidebar on every problem, aware of your latest verdict, with opt-in
-  attachment of the current editor code and a one-click clear-conversation button; without an
-  LLM key it shows a setup hint instead of failing per message
+  attachment of the current editor code and a one-click clear-conversation button; replies
+  follow the interface language; without an LLM key it shows a setup hint instead of failing
+  per message
 - Local submission archive (JSON Lines) with site-side import; accepted status derived per problem
 - Bilingual UI (zh/en); light/dark design system with semantic success/warning/danger colors;
   unified toast notifications (errors persist until dismissed); uniform frontend request timeouts

@@ -11,6 +11,10 @@ const props = defineProps({
   // lazy getter for the editor buffer; opt-in per question so a long
   // solution is not shipped to the LLM on every casual ask
   getCode: { type: Function, default: null },
+  // editor language for the attached-code context label ("Current code
+  // (python3):" instead of a meaningless "text"); the backend only reads
+  // it alongside code
+  codeLang: { type: String, default: '' },
 })
 
 const i18n = useI18nStore()
@@ -175,7 +179,7 @@ async function send() {
       history,
       qid: askedQid,
       code: attachCode.value && props.getCode ? props.getCode() : null,
-      lang: null,
+      lang: props.codeLang || null,
     })
     if (askedQid !== props.qid) return // user switched problems meanwhile
     // content stays raw for the LLM history; html is the rendered form

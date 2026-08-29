@@ -93,14 +93,17 @@ GET  /api/archive/recent            本地归档最近记录；?qid= 按题目�
 POST /api/archive/import-site       submissionList 导入（≤20 条边界，去重键 = submission_id，
                                     状态分类与判题共用 cn.classify_status_text 单一来源；
                                     批次按时间戳升序追加，维持文件「追加序=时间序」不变量）
-POST /api/ask                       无状态问答 {question, history?, qid, code?, lang?}——
-                                    题目与最近判定自动入上下文；code 为用户显式附带当前代码（截断 6000 字符）
+POST /api/ask                       无状态问答 {question, history?, qid, code?, lang?, ui_lang?}——
+                                    题目与最近判定自动入上下文；code 为用户显式附带当前代码（截断 6000 字符）；
+                                    ui_lang（前端 i18n store 附带）决定系统提示词/上下文标签语言，
+                                    未知值回退 zh
 POST /api/llm/test                  LLM 连通性探测：payload 字段（llm_api_key/base_url/
                                     model/thinking）覆盖已保存配置、缺省回退，发一条
                                     max_tokens 限幅的 ping；未配置 400，失败走
                                     NetworkError → 502 结构化错误
 POST /api/analyze                   解题统计 + 标签掌握度 + 推荐 + AI 报告（use_llm 可关；
-                                    ai_configured 恒由保存的配置推导，与本次是否生成解耦）
+                                    ui_lang 决定报告提示词与摘要语言；ai_configured 恒由保存的
+                                    配置推导，与本次是否生成解耦）
 DELETE /api/local-data              清除全部本地数据（题库缓存/归档/工作区/配置），
                                     同步进行中返回 409；保留运行中的 instance.lock；
                                     与 sync 启动共用 _lifecycle_lock 互斥（无 TOCTOU），

@@ -213,6 +213,125 @@ def test_ask_trims_history_to_twelve(client, monkeypatch):
     assert non_system[0]["content"] == "msg8"
 
 
+def test_ask_system_prompt_follows_ui_lang(client, monkeypatch):
+    """The app ships a bilingual UI, but the coach prompt was a Chinese
+    constant: an en-locale user asking in English always got a Chinese
+    answer. ui_lang now selects the prompt, the context labels and the
+    reply language; an unknown/missing value falls back to zh."""
+    seed_config_llm(monkeypatch)
+    seed_cache()
+
+    class FakeLLM:
+        model = "test-model"
+
+        def chat(self, messages):
+            FakeLLM.captured = messages
+            return "ok"
+
+    monkeypatch.setattr(api_module, "_build_llm", lambda: FakeLLM())
+
+    client.post(
+        "/api/ask",
+        json={"question": "why TLE?", "qid": "two-sum", "ui_lang": "en"},
+        headers=ORIGIN,
+    )
+    system_message = FakeLLM.captured[0]["content"]
+    assert "Answer in English" in system_message
+    assert "Current problem:" in system_message
+    assert "Array" in system_message
+    # the seeded row has no title_en: the en label wraps the zh title fallback
+    assert "Current problem: 1 两数之和" in system_message
+
+    # default (no ui_lang) keeps the historical zh behavior
+    FakeLLM.captured = None
+    client.post("/api/ask", json={"question": "为什么超时？"}, headers=ORIGIN)
+    assert "用简体中文回答" in FakeLLM.captured[0]["content"]
+
+    # an unknown ui_lang value must not crash or switch the prompt
+    FakeLLM.captured = None
+    client.post(
+        "/api/ask", json={"question": "?", "ui_lang": "fr"}, headers=ORIGIN
+    )
+    assert "用简体中文回答" in FakeLLM.captured[0]["content"]
+
+
+class FakeReportLLM:
+    """Records the report messages so digest/prompt language is assertable."""
+
+    model = "test-model"
+
+    def chat(self, messages):
+        FakeReportLLM.captured = messages
+        return "报告内容"
+
+
+def test_analyze_generates_ai_report_with_saved_config(client, monkeypatch):
+    """The use_llm=true path (digest build, report return) had zero test
+    coverage - the whole AI report feature was regression-blind."""
+    seed_cache()
+    seed_config_llm(monkeypatch)
+    monkeypatch.setattr(api_module, "_build_llm", lambda: FakeReportLLM())
+
+    response = client.post(
+        "/api/analyze", json={"use_llm": True}, headers=ORIGIN
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ai_report"] == "报告内容"
+    assert body["ai_configured"] is True
+
+    system_message = FakeReportLLM.captured[0]["content"]
+    # the digest embeds the real local stats
+    assert "- 解出 0 题" in system_message
+    assert "薄弱点分析" in system_message
+    assert FakeReportLLM.captured[-1]["content"] == "请生成我的学习报告。"
+
+
+def test_analyze_ai_report_language_follows_ui_lang(client, monkeypatch):
+    seed_cache()
+    seed_config_llm(monkeypatch)
+    monkeypatch.setattr(api_module, "_build_llm", lambda: FakeReportLLM())
+
+    response = client.post(
+        "/api/analyze", json={"use_llm": True, "ui_lang": "en"}, headers=ORIGIN
+    )
+    assert response.status_code == 200
+    system_message = FakeReportLLM.captured[0]["content"]
+    assert "Answer in English" in system_message
+    assert "Solved 0 problems" in system_message
+    assert "weakness analysis" in system_message
+    assert FakeReportLLM.captured[-1]["content"] == "Please generate my learning report."
+    # zh digest fragments must not leak into the en prompt
+    assert "解出" not in system_message
+
+
+def test_analyze_ai_report_failure_degrades_to_none(client, monkeypatch):
+    """A failing LLM call must not fail the stats endpoint (fatal/transient
+    separation): the report degrades to None and ai_configured stays true so
+    the user can retry."""
+    from lc.exceptions import NetworkError
+
+    seed_cache()
+    seed_config_llm(monkeypatch)
+
+    class FailingLLM:
+        model = "test-model"
+
+        def chat(self, messages):
+            raise NetworkError("LLM HTTP 500: boom")
+
+    monkeypatch.setattr(api_module, "_build_llm", lambda: FailingLLM())
+
+    response = client.post(
+        "/api/analyze", json={"use_llm": True}, headers=ORIGIN
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ai_report"] is None
+    assert body["ai_configured"] is True
+    assert body["stats"]["solved_total"] == 0
+
+
 def test_import_site_dedupes_by_submission_id(client, monkeypatch):
     seed_cache()
     items = [

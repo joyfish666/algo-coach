@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Seventh review pass: user/developer double-angle audit (2026-08-29)
+
+**Features**
+
+- The AI coach and the AI weakness report now follow the interface language:
+  `/api/ask` and `/api/analyze` accept a `ui_lang` field (attached centrally by
+  the frontend api layer from the i18n store), which selects the coach system
+  prompt, the context labels (problem / verdict / code), the analytics digest
+  and the report instruction. The prompt was a hardcoded Chinese constant, so
+  an en-locale user asking in English always got a Chinese answer; unknown
+  `ui_lang` values fall back to zh.
+- The AI panel's "attach current code" now labels the editor language
+  (`Current code (python3):` instead of `(text)`) via a new `codeLang` prop.
+
+**Tests / tooling**
+
+- `check:i18n` is now a two-way guard: besides the existing literal-usage and
+  parity checks it fails on unreachable "dead" catalog keys, accepting
+  reachability from four declared sources (literal `t()` calls,
+  `titleKey`/`labelKey`/`key` object literals, the declared dynamic families
+  `verdict_`/`diff_`, and the server catalog parsed from `lc/i18n.py`). The
+  reverse direction is what let stale copy rot: `setup_body` still claimed the
+  setup wizard "arrives in a later release" long after it shipped, and 8 more
+  frontend keys (2 locales each) plus 3 never-sent backend message keys were
+  dead. A pytest mirror (`test_backend_message_keys_are_actually_raised`)
+  guards the backend catalog the same way.
+- The `/api/analyze` AI-report path (use_llm=true) had zero coverage since it
+  landed; covered now together with the `ui_lang` behavior: digest build,
+  report return, and the NetworkError degradation to `ai_report: null` with
+  `ai_configured` untouched. Backend 251→256, frontend 98→100.
+
 ### Sixth review pass: user/developer double-angle audit (2026-08-28)
 
 **Features**

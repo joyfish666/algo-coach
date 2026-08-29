@@ -1,7 +1,9 @@
-"""UI message catalog (zh/en), selected by system locale, overridable in settings.
+"""Server-side message catalog (zh/en), selected by the process locale.
 
-Simple dict approach (no gettext). UI language affects interface strings only;
-problem statements are always Chinese because the data source is leetcode.cn.
+Simple dict approach (no gettext). These strings back the message_key
+protocol: the frontend catalogs carry the same keys and re-translate every
+server-sent error into the UI language, so this text is the fallback for
+API consumers and logs rather than the primary user-facing wording.
 """
 
 from __future__ import annotations
@@ -22,10 +24,7 @@ MESSAGES = {
         "judge_missing_question_id": "该题缺少站点内部题号，无法判定；请重新打开题目后重试",
         "run_timeout": "运行判定超时，请稍后重试；若持续失败请把调试日志发给开发者",
         "sync_in_progress": "题库同步正在进行中",
-        "not_configured": "尚未完成配置",
         "ask_not_configured": "LLM 未配置，请先在设置中填写 API Key 与接口地址",
-        "action_retry": "重试",
-        "action_relogin": "重新粘贴 Cookie",
     },
     "en": {
         "cookie_invalid": "Cookie has expired, please paste a new one",
@@ -39,10 +38,7 @@ MESSAGES = {
         "judge_missing_question_id": "This problem is missing its internal question id; reopen it and retry",
         "run_timeout": "Run judging timed out - please retry; if it keeps failing share the debug log",
         "sync_in_progress": "Problem list sync already in progress",
-        "not_configured": "Setup not completed yet",
         "ask_not_configured": "LLM is not configured yet - set your API key and base URL in settings first",
-        "action_retry": "Retry",
-        "action_relogin": "Paste cookie again",
     },
 }
 

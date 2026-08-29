@@ -90,4 +90,16 @@ describe('api error translation', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(okResponse({ app: 'algocoach' })))
     await expect(api.getStatus()).resolves.toEqual({ app: 'algocoach' })
   })
+
+  it('attaches the UI language to ask and analyze payloads', async () => {
+    // the backend phrases the coach prompt and report digest in this
+    // language; without it the coach always replied in Chinese
+    const fetchMock = vi.fn().mockResolvedValue(okResponse({ ok: true }))
+    vi.stubGlobal('fetch', fetchMock)
+    useI18nStore().set('en')
+    await api.ask({ question: 'why?' })
+    await api.analyze({ use_llm: true })
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).ui_lang).toBe('en')
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body).ui_lang).toBe('en')
+  })
 })
