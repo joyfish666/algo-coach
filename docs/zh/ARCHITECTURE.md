@@ -33,10 +33,10 @@ web (Vue 3 SPA)  ↔  server (FastAPI 传输层)  ↔  lc (核心业务层)  ↔
 - **lc/**：与 UI 框架解耦的核心业务层——config（配置+锁+env 校验）/ auth / httpclient /
   exceptions / logutil / i18n / langs / problems（题库缓存+同步引擎）/ workspace
   （每题工作区物化，含 STATEMENT_VERSION 版本契约）/ htmltomd（题面 HTML→Markdown
-  转换器）/ coach（AI 提示词工程，纯逻辑）/ clock / validate / judge / archive /
-  favorites / llm / atomicio（跨平台原子写：tmp + os.replace，Windows 上对并发读者
-  造成的 sharing violation 做有界重试；config/favorites/题库缓存/工作区文件的唯一
-  写盘通道）。
+  转换器）/ coach（AI 提示词工程，纯逻辑）/ clock / validate / cookies（同名跨域
+  Cookie 的容错读取与去重）/ judge / archive / favorites / llm / atomicio（跨平台
+  原子写：tmp + os.replace，Windows 上对并发读者造成的 sharing violation 做有界重试；
+  config/favorites/题库缓存/工作区文件的唯一写盘通道）。
 - **sites/cn.py**：所有 GraphQL 响应解析单点收口，字段缺失降级为清晰报错而非崩溃。
 - **SiteAdapter 抽象**（sites/base.py）：最小接口，只为 cn 实现；leetcode.com 待需求验证。
 

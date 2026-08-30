@@ -5,6 +5,14 @@
 ## 站点与请求
 
 - **Referer 缺失导致 403**：对 leetcode.cn 的 GraphQL 请求需注入浏览器 UA + Referer + csrfToken。
+- **同名 Cookie 跨域重复会让 requests 的按名读取直接抛错**（2026-08-30 已修复）：
+  cn 站会在 apex 与 www 两个域各种一条 csrftoken；用户只粘贴 LEETCODE_SESSION 时
+  会话头里没有 csrf，站点下发后 jar 里同名 Cookie 出现两条——`jar.get(name)` 从此
+  每次都抛 `CookieConflictError`：轮换持久化钩子整体失效（LEETCODE_SESSION 轮换与
+  csrf 采纳全部丢失）、提交路径的 csrf 头读取不可用。规则：**按名读 Cookie 一律走
+  `lc.cookies.jar_value`（同名取最近值）**；轮换钩子先用 `dedupe_jar` 收敛管理名再读，
+  并把站点签发的 token 采纳到会话 `X-CSRFToken` 头上（只贴 SESSION 的用户提交判题
+  也要带上它）。
 - **内部 question_id ≠ 前端题号**：frontendQuestionId 可能非纯数字（如「剑指 Offer 03」「面试题 17.16」「LCP 07」，含空格与中文）。规范键一律用 slug；题号全数字时目录命名 `0001-two-sum/`，否则直接用 slug。
 - **UA 风控**：使用真实浏览器 UA。
 - **每日一题时区**：以 00:00 UTC+8 为界。
