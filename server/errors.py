@@ -22,6 +22,7 @@ from fastapi import HTTPException
 from lc.exceptions import (
     AlgoCoachError,
     AuthError,
+    GroupNotFoundError,
     JudgeError,
     NetworkError,
     PremiumProblemError,
@@ -36,6 +37,7 @@ STATUS_BY_EXCEPTION = {
     AuthError: 401,
     PremiumProblemError: 403,
     ProblemNotFoundError: 404,
+    GroupNotFoundError: 404,
     NetworkError: 502,
     JudgeError: 502,
 }

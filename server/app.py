@@ -15,7 +15,8 @@ Layer rules:
 
 Endpoints live in server.routers, grouped by concern:
 settings (app status / setup / config), problems (list, sync, workspace,
-judge), coach (AI ask / analyze), archive (history, import, data wipe).
+judge), groups (practice-plan trees, share codes), coach (AI ask / analyze),
+archive (history, import, data wipe).
 """
 
 from __future__ import annotations
@@ -33,7 +34,7 @@ import lc
 from lc.exceptions import AlgoCoachError
 from lc.logutil import logger
 from server.errors import error_payload, status_for
-from server.routers import archive, coach, problems, settings
+from server.routers import archive, coach, groups, problems, settings
 
 LOCAL_HOSTNAMES = ("127.0.0.1", "localhost", "::1")
 DEV_ORIGINS = ("http://localhost:5173", "http://127.0.0.1:5173")
@@ -172,6 +173,7 @@ async def unhandled_error_handler(request: Request, exc: Exception):
 
 app.include_router(settings.router)
 app.include_router(problems.router)
+app.include_router(groups.router)
 app.include_router(coach.router)
 app.include_router(archive.router)
 

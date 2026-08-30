@@ -200,5 +200,60 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ favorite }),
     }),
+  getGroups: () => request('/api/groups'),
+  createGroup: (name, parent = null) =>
+    request('/api/groups', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, parent }),
+    }),
+  renameGroup: (id, name) =>
+    request(`/api/groups/${encodeURIComponent(id)}/rename`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    }),
+  moveGroup: (id, parent, index = null) =>
+    request(`/api/groups/${encodeURIComponent(id)}/move`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ parent, index }),
+    }),
+  deleteGroup: (id) =>
+    request(`/api/groups/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  addGroupItems: (id, slugs) =>
+    request(`/api/groups/${encodeURIComponent(id)}/items`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ slugs }),
+    }),
+  setGroupOrder: (id, slugs) =>
+    request(`/api/groups/${encodeURIComponent(id)}/items`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ slugs }),
+    }),
+  removeGroupItem: (id, slug) =>
+    request(`/api/groups/${encodeURIComponent(id)}/items/${encodeURIComponent(slug)}`, {
+      method: 'DELETE',
+    }),
+  setGroupMarked: (id, slugs) =>
+    request(`/api/groups/${encodeURIComponent(id)}/marked`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ slugs }),
+    }),
+  importGroups: (code) =>
+    request('/api/groups/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code }),
+    }),
+  exportGroups: (ids = null) =>
+    request('/api/groups/export', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(ids ? { ids } : {}),
+    }),
   clearLocalData: () => request('/api/local-data', { method: 'DELETE' }),
 }

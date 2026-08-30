@@ -18,6 +18,9 @@ export const STORAGE_KEYS = Object.freeze({
   // persist under 'algocoach-ai-pos'; useFloatingPanel reads that as a legacy
   // fallback.
   panelPos: 'algocoach-panel-pos',
+  // per-group collapse state on the /groups page: {groupId: true} marks a
+  // collapsed node; UI preference, survives "erase all local data"
+  groupCollapsed: 'algocoach-group-collapsed',
   snapshotPrefix: 'algocoach-snapshot:',
   snapshotIndex: 'algocoach-snapshot-index',
 })

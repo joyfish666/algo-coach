@@ -118,6 +118,13 @@ watch(
             </svg>
             <span>{{ i18n.t('nav_problems') }}</span>
           </RouterLink>
+          <RouterLink to="/groups" class="nav-item">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3.5 7.5a2 2 0 0 1 2-2h3.6l2 2h7.4a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z" />
+              <path d="M12 10.5v5M9.5 13h5" />
+            </svg>
+            <span>{{ i18n.t('nav_groups') }}</span>
+          </RouterLink>
           <RouterLink to="/daily" class="nav-item">
             <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
               <rect x="3.5" y="5" width="17" height="15.5" rx="2.5" />

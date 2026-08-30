@@ -25,6 +25,10 @@ MESSAGES = {
         "run_timeout": "运行判定超时，请稍后重试；若持续失败请把调试日志发给开发者",
         "sync_in_progress": "题库同步正在进行中",
         "ask_not_configured": "LLM 未配置，请先在设置中填写 API Key 与接口地址",
+        "group_not_found": "未找到该分组",
+        "group_cycle": "不能把分组移动到它自己或它的子分组里",
+        "group_depth_limit": "超过最大嵌套深度（10 层）",
+        "group_invalid_code": "分享码无效或已损坏，请检查后重新粘贴",
     },
     "en": {
         "cookie_invalid": "Cookie has expired, please paste a new one",
@@ -39,6 +43,10 @@ MESSAGES = {
         "run_timeout": "Run judging timed out - please retry; if it keeps failing share the debug log",
         "sync_in_progress": "Problem list sync already in progress",
         "ask_not_configured": "LLM is not configured yet - set your API key and base URL in settings first",
+        "group_not_found": "Group not found",
+        "group_cycle": "Cannot move a group into its own subtree",
+        "group_depth_limit": "Exceeds the maximum nesting depth (10 levels)",
+        "group_invalid_code": "Invalid or corrupted share code - please check and paste again",
     },
 }
 

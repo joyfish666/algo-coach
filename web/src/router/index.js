@@ -18,6 +18,12 @@ const routes = [
     meta: { titleKey: 'problems_title' },
   },
   {
+    path: '/groups',
+    name: 'groups',
+    component: () => import('../views/Groups.vue'),
+    meta: { titleKey: 'groups_title' },
+  },
+  {
     path: '/problem/:qid',
     name: 'problem-detail',
     component: () => import('../views/ProblemDetail.vue'),

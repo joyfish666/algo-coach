@@ -49,3 +49,27 @@ class JudgeError(AlgoCoachError):
     """Judge submission or polling failure."""
 
     message_key = "judge_timeout_unknown"
+
+
+class GroupNotFoundError(AlgoCoachError):
+    """Unknown group id."""
+
+    message_key = "group_not_found"
+
+
+class GroupCycleError(AlgoCoachError):
+    """A group cannot be moved into its own subtree."""
+
+    message_key = "group_cycle"
+
+
+class GroupDepthError(AlgoCoachError):
+    """The nesting cap (lc.groups.MAX_DEPTH) would be exceeded."""
+
+    message_key = "group_depth_limit"
+
+
+class GroupShareCodeError(AlgoCoachError):
+    """Malformed, corrupted or oversized group share code."""
+
+    message_key = "group_invalid_code"

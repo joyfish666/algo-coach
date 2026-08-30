@@ -1,6 +1,7 @@
 <script setup>
 import { computed } from 'vue'
 
+import GroupPickerPopover from './GroupPickerPopover.vue'
 import StarIcon from './StarIcon.vue'
 import { difficultyClass, difficultyLabel } from '../utils/difficulty'
 import { useI18nStore } from '../stores/i18n'
@@ -42,6 +43,7 @@ function onToggleFavorite() {
       </span>
     </span>
     <span class="pright">
+      <GroupPickerPopover :slug="row.slug" align="right" class="pcard-grp" />
       <span
         role="button"
         tabindex="0"
@@ -140,6 +142,20 @@ function onToggleFavorite() {
   flex-shrink: 0;
   gap: var(--space-2);
   margin-left: auto;
+}
+
+/* the add-to-group entry stays out of the way until hovered: the row is
+   already dense (star / status / difficulty / paid marks), and the whole
+   card is a RouterLink so a visible extra button would read as a nav cue */
+.pcard :deep(.pcard-grp .grp-btn) {
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.pcard:hover :deep(.pcard-grp .grp-btn),
+.pcard :deep(.pcard-grp .grp-btn:focus-visible),
+.pcard :deep(.pcard-grp .grp-btn[aria-expanded='true']) {
+  opacity: 1;
 }
 
 .fav {

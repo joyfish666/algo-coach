@@ -28,6 +28,7 @@ CONFIG_FILE_NAME = "config.toml"
 PROBLEMS_CACHE_NAME = "problems.json"
 ARCHIVE_FILE_NAME = "submissions.jsonl"
 FAVORITES_FILE_NAME = "favorites.json"
+GROUPS_FILE_NAME = "groups.json"
 INSTANCE_LOCK_NAME = "instance.lock"
 
 DEFAULTS = {
@@ -100,6 +101,10 @@ def archive_path() -> Path:
 
 def favorites_path() -> Path:
     return app_dir() / FAVORITES_FILE_NAME
+
+
+def groups_path() -> Path:
+    return app_dir() / GROUPS_FILE_NAME
 
 
 def workspace_root_path(config: dict) -> Path:

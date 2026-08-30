@@ -16,6 +16,9 @@ All data — cookies, configs, submission archives — stays on your machine. No
   testcases; reopening a problem resumes at the language you last used
 - Submission history and one-click site import over the local archive; offline review of
   opened problems (materialized as local files you own)
+- User-defined groups (practice plans): nestable, ordered problem lists that record
+  slugs only, shareable via versioned share codes; add problems from the list, the
+  workbench, or the groups page
 - Daily problem shortcut; analytics dashboard with tag-mastery chart, recommendations and
   an AI weakness report; stateless AI coach sidebar on every problem (replies follow the
   interface language, opt-in editor-code attachment)
