@@ -162,3 +162,21 @@ def test_bind_free_socket_skips_occupied_and_holds(monkeypatch):
 
 def test_config_exposes_app_dir_lock_location():
     assert cli.lock_path() == config.app_dir() / "instance.lock"
+
+
+def test_second_launch_adopts_running_instance(monkeypatch):
+    """Double-clicking the launcher again must end with the site open, not a
+    second server nor an error window: the probe-hit path opens the running
+    instance's URL and exits cleanly."""
+    opened = {}
+    monkeypatch.setattr(cli, "probe_is_coach", lambda host, port: True)
+    monkeypatch.setattr(
+        cli.webbrowser, "open", lambda url: opened.setdefault("url", url) or True
+    )
+    assert cli.main([]) == 0
+    assert opened["url"] == "http://127.0.0.1:8000"
+
+
+def test_second_launch_no_browser_keeps_refusal_semantics(monkeypatch):
+    monkeypatch.setattr(cli, "probe_is_coach", lambda host, port: True)
+    assert cli.main(["--no-browser"]) == 1

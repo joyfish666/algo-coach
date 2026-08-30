@@ -19,13 +19,17 @@ the full development history lives in the git log.
 - **Windows launcher**: double-click `start.bat` starts the server from the
   project venv and opens the browser; it verifies the one-time prerequisites
   (package install, built frontend) and prints exactly what is missing.
+  Launching it again while an instance runs adopts that instance - it opens
+  the site in the browser (resetting the idle clock) and exits cleanly,
+  never starting a second server or showing an error window.
 
 ### Changed
 
 - The problem-list filter bar stays on one row: the tag select no longer
   sizes itself to its longest option (which used to push the density toggle
-  to a second line after a full sync); the search box is the only flexible
-  item and the toolbar scrolls horizontally on very narrow windows.
+  to a second line after a full sync), the search box grows only to a cap so
+  the action buttons keep breathing room at the row's end, and the toolbar
+  scrolls horizontally on very narrow windows.
 - Backend structure (no behavior change): `server/api.py` split into a package —
   `app.py` (composition root), `errors.py` (one error envelope),
   `state.py` (process singletons), and `routers/` grouped by concern

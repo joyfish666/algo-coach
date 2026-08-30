@@ -305,10 +305,19 @@ onMounted(() => {
   padding: var(--space-4);
 }
 
+/* breathing room after the last control even when the row overflows and
+   scrolls: a scroll container can render its trailing padding unreliably */
+.toolbar::after {
+  content: "";
+  flex: 0 0 var(--space-2);
+}
+
 .search {
-  /* the only flexible item: everything else keeps its intrinsic width */
-  flex: 1;
+  /* grows with the window but stops well before pushing the action buttons
+     against the card's right edge - leftover space stays on the right */
+  flex: 1 1 auto;
   min-width: 160px;
+  max-width: 360px;
 }
 
 .toolbar > .select,

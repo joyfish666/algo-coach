@@ -261,8 +261,17 @@ def main(argv=None):
         print(f"[coach] warning: could not write {log_dir / LOG_FILE_NAME}")
 
     if probe_is_coach(host, args.port):
-        print(f"[coach] another AlgoCoach instance already answers at http://{host}:{args.port}")
-        print("[coach] refusing to start a second one; open that URL in your browser instead.")
+        url = f"http://{host}:{args.port}"
+        print(f"[coach] AlgoCoach already runs at {url}")
+        if not args.no_browser:
+            # double-clicking the launcher again must end with the site open,
+            # not a second server and not an error window: adopt the running
+            # instance (its idle-exit clock also resets once the browser
+            # heartbeats again)
+            print("[coach] opening it in your browser instead of starting a second instance.")
+            webbrowser.open(url)
+            return 0
+        print("[coach] refusing to start a second one; open that URL in your browser.")
         return 1
 
     # fail at the door, not as a 500 on every API call later
@@ -297,11 +306,19 @@ def main(argv=None):
     owned, existing = acquire_instance_lock(port)
     if not owned:
         sock.close()
+        # the probe above only knows the preferred port; a port-shifted
+        # survivor is recorded in the lock, so open its actual URL
         recorded = existing.get("port", port)
+        url = f"http://{host}:{recorded}"
         print(
-            f"[coach] refusing to start: another AlgoCoach instance "
-            f"(pid {existing.get('pid', '?')}) already runs at http://{host}:{recorded}"
+            f"[coach] another AlgoCoach instance (pid {existing.get('pid', '?')}) "
+            f"already runs at {url}"
         )
+        if not args.no_browser:
+            print("[coach] opening it in your browser instead of starting a second instance.")
+            webbrowser.open(url)
+            return 0
+        print("[coach] refusing to start a second one.")
         return 1
 
     url = f"http://{host}:{port}"
