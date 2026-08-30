@@ -678,15 +678,30 @@ def test_status_exposes_llm_configured(client):
 # web-UI liveness heartbeat (drives the cli --idle-exit watchdog)
 
 
-def test_heartbeat_endpoint_resets_idle_clock(client):
-    import time as time_module
+def test_heartbeat_endpoint_resets_idle_clock(client, monkeypatch):
+    """The request must move the idle clock backwards - deterministically.
 
+    The real-time version raced on Windows CI: sleep(0.02) under-delivered
+    (15.6ms timer granularity), the request itself took about as long, and
+    `after < before` failed by nanoseconds. A fake clock on server.state's
+    time source (and only there) makes the reset observable exactly.
+    """
     from server import state
 
-    time_module.sleep(0.02)
+    class _FakeClock:
+        now = 0.0
+
+        @classmethod
+        def monotonic(cls):
+            return cls.now
+
+    monkeypatch.setattr(state, "time", _FakeClock)
+    _FakeClock.now = state._last_heartbeat + 5.0
     elapsed_before = state.seconds_since_heartbeat()
+    assert elapsed_before == 5.0
     assert client.get("/api/heartbeat").status_code == 200
-    assert state.seconds_since_heartbeat() < elapsed_before
+    _FakeClock.now += 1.0
+    assert state.seconds_since_heartbeat() == 1.0
 
 
 def test_reset_app_state_starts_a_fresh_idle_window():
@@ -694,6 +709,8 @@ def test_reset_app_state_starts_a_fresh_idle_window():
 
     from server import state
 
-    time_module.sleep(0.02)
+    time_module.sleep(0.05)
     state.reset_app_state()
-    assert state.seconds_since_heartbeat() < 0.02
+    # generous bound: a loaded CI runner can pause between the reset and the
+    # read; 0.5s still proves the window restarted (the deadline is minutes)
+    assert state.seconds_since_heartbeat() < 0.5
