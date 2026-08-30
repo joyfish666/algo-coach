@@ -296,41 +296,38 @@ onMounted(() => {
 .toolbar {
   /* one row, always: the tag <select> used to size itself to its longest
      option text (hundreds of tag names after a full sync), which ate the
-     whole row and pushed the density toggle onto a second line */
+     whole row and pushed the density toggle onto a second line. The filter
+     controls get compact fixed widths so the row fits without scrolling. */
   display: flex;
   flex-wrap: nowrap;
   gap: var(--space-3);
   margin-bottom: var(--space-4);
-  overflow-x: auto;
   padding: var(--space-4);
 }
 
-/* breathing room after the last control even when the row overflows and
-   scrolls: a scroll container can render its trailing padding unreliably */
-.toolbar::after {
-  content: "";
-  flex: 0 0 var(--space-2);
-}
-
 .search {
-  /* grows with the window but stops well before pushing the action buttons
-     against the card's right edge - leftover space stays on the right */
+  /* the only flexible item; leftover space stays at the row's end so the
+     density toggle never sits against the card's right edge */
   flex: 1 1 auto;
-  min-width: 160px;
+  min-width: 120px;
   max-width: 360px;
 }
 
-.toolbar > .select,
-.toolbar > .btn {
-  flex: none;
-}
-
-.tag-select {
-  /* cap the option-driven intrinsic width; the closed select clips its
-     label (dropdown lists still show full option text) */
+.toolbar > .select {
+  /* compact uniform width instead of the option-driven intrinsic one; the
+     closed select clips its label, dropdown lists still show full text */
   flex: 0 1 auto;
   min-width: 0;
-  max-width: 200px;
+  width: 100px;
+}
+
+/* widest filter: shows the selected tag name */
+.toolbar > .tag-select {
+  width: 136px;
+}
+
+.toolbar > .btn {
+  flex: none;
 }
 
 .problem-list {
