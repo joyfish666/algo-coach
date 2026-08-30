@@ -2,9 +2,22 @@ import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 
+const snapshotMocks = vi.hoisted(() => ({
+  saveSnapshot: vi.fn(),
+}))
+
+// every component along the workbench tree may register route guards; the
+// router invokes all of them on navigation, so capture a list
+const routerMocks = vi.hoisted(() => ({
+  routeLeaveHooks: [],
+}))
+
 const apiMocks = {
   getProblem: vi.fn(),
   putSolution: vi.fn().mockResolvedValue({ saved: true }),
+  putNotes: vi.fn().mockResolvedValue({ saved: true }),
+  putTestcases: vi.fn().mockResolvedValue({ saved: true }),
+  putFavorite: vi.fn().mockResolvedValue({ favorite: true }),
   judgeRun: vi.fn(),
   judgeSubmit: vi.fn(),
   getTemplate: vi.fn(),
@@ -18,12 +31,14 @@ vi.mock('../api', () => ({
 
 vi.mock('../snapshots', () => ({
   loadSnapshot: () => null,
-  saveSnapshot: () => {},
+  saveSnapshot: snapshotMocks.saveSnapshot,
   snapshotNewerThan: () => false,
 }))
 
 vi.mock('vue-router', () => ({
-  onBeforeRouteLeave: () => {},
+  onBeforeRouteLeave: (fn) => {
+    routerMocks.routeLeaveHooks.push(fn)
+  },
   useRouter: () => ({ push: vi.fn() }),
 }))
 
@@ -43,11 +58,29 @@ const FIXTURE = {
   code: '// tpl\n',
   testcases: '',
   cases: [],
+  notes: '',
   solution_mtime: 0,
   statement_markdown: '给定一个整数数组',
 }
 
+const NEXT_FIXTURE = {
+  ...JSON.parse(JSON.stringify(FIXTURE)),
+  slug: 'valid-parentheses',
+  title_cn: '有效的括号',
+  language: 'python3',
+  languages_available: ['python3'],
+  code: '# next problem\n',
+  notes: '# next notes\n',
+  testcases: '()\n',
+}
+
 const raf = () => new Promise((r) => requestAnimationFrame(() => r()))
+
+// watchers flush asynchronously: one macrotask lets the queued callbacks run
+const settleWatchers = async () => {
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  await flushPromises()
+}
 
 async function mountWorkbench(localStorageSeed) {
   localStorage.setItem('algocoach-workbench-split', JSON.stringify(localStorageSeed))
@@ -57,7 +90,10 @@ async function mountWorkbench(localStorageSeed) {
     global: {
       plugins: [createPinia()],
       stubs: {
-        CodeEditor: { template: '<div class="stub-editor"/>' },
+        CodeEditor: {
+          emits: ['update:modelValue'],
+          template: '<div class="stub-editor" @click="$emit(\'update:modelValue\', \'// typed\')"/>',
+        },
         AiChatSidebar: { template: '<div class="stub-ai"/>' },
         RouterLink: { template: '<a><slot/></a>' },
         Teleport: { template: '<div><slot/></div>' },
@@ -74,6 +110,11 @@ describe('workbench layout', () => {
     setActivePinia(createPinia())
     localStorage.clear()
     document.body.innerHTML = ''
+    routerMocks.routeLeaveHooks.length = 0
+    snapshotMocks.saveSnapshot.mockClear()
+    apiMocks.putSolution.mockClear()
+    apiMocks.putNotes.mockClear()
+    apiMocks.putTestcases.mockClear()
   })
 
   it('renders the converted statement text', async () => {
@@ -101,7 +142,10 @@ describe('workbench layout', () => {
       global: {
         plugins: [createPinia()],
         stubs: {
-          CodeEditor: { template: '<div class="stub-editor"/>' },
+          CodeEditor: {
+            emits: ['update:modelValue'],
+            template: '<div class="stub-editor" @click="$emit(\'update:modelValue\', \'// typed\')"/>',
+          },
           AiChatSidebar: { template: '<div class="stub-ai"/>' },
           RouterLink: { template: '<a><slot/></a>' },
           Teleport: { template: '<div><slot/></div>' },
@@ -110,9 +154,7 @@ describe('workbench layout', () => {
       attachTo: document.body,
     })
     await flushPromises()
-    // one full macrotask later the queued watcher callbacks have flushed too
-    await new Promise((resolve) => setTimeout(resolve, 0))
-    await flushPromises()
+    await settleWatchers()
 
     expect(apiMocks.putSolution).not.toHaveBeenCalled()
     const select = wrapper.find('[data-testid="editor-lang-select"]')
@@ -162,6 +204,113 @@ describe('workbench layout', () => {
     expect(wrapper.find('.editor-zone').attributes('style')).toContain('height: 80%')
 
     document.dispatchEvent(new MouseEvent('mouseup'))
+    wrapper.unmount()
+  })
+})
+
+describe('workbench persistence contracts', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    localStorage.clear()
+    document.body.innerHTML = ''
+    routerMocks.routeLeaveHooks.length = 0
+    snapshotMocks.saveSnapshot.mockClear()
+    apiMocks.putSolution.mockClear()
+    apiMocks.putNotes.mockClear()
+    apiMocks.putTestcases.mockClear()
+  })
+
+  it('flushes a pending code autosave under the OLD qid when the problem switches', async () => {
+    // Both halves of this contract are load-bearing: flushing with the old
+    // qid keeps the last keystrokes; a bare cancel would drop them, and
+    // letting the new qid be used would corrupt the next problem's file.
+    const wrapper = await mountWorkbench({ mainPct: 42, editorPct: 66 })
+    apiMocks.getProblem.mockResolvedValue(JSON.parse(JSON.stringify(NEXT_FIXTURE)))
+
+    await wrapper.find('.stub-editor').trigger('click') // type into the editor
+    await wrapper.setProps({ qid: 'valid-parentheses' })
+    await settleWatchers()
+
+    expect(apiMocks.putSolution).toHaveBeenCalledWith('two-sum', 'cpp', '// typed')
+    expect(apiMocks.putSolution).toHaveBeenCalledTimes(1)
+    // the next problem still loads normally afterwards
+    expect(wrapper.find('[data-testid="editor-lang-select"]').element.value).toBe('python3')
+    wrapper.unmount()
+  })
+
+  it('snapshots the draft under the OLD qid when the problem switches', async () => {
+    const wrapper = await mountWorkbench({ mainPct: 42, editorPct: 66 })
+    apiMocks.getProblem.mockResolvedValue(JSON.parse(JSON.stringify(NEXT_FIXTURE)))
+
+    await wrapper.find('.stub-editor').trigger('click')
+    await wrapper.setProps({ qid: 'valid-parentheses' })
+    await settleWatchers()
+
+    expect(snapshotMocks.saveSnapshot).toHaveBeenCalledWith('two-sum', 'cpp', '// typed')
+    wrapper.unmount()
+  })
+
+  it('flushes a pending notes autosave under the OLD qid when the problem switches', async () => {
+    const wrapper = await mountWorkbench({ mainPct: 42, editorPct: 66 })
+    apiMocks.getProblem.mockResolvedValue(JSON.parse(JSON.stringify(NEXT_FIXTURE)))
+
+    await wrapper.find('[data-testid="notes-input"]').setValue('# 我的思路')
+    await wrapper.setProps({ qid: 'valid-parentheses' })
+    await settleWatchers()
+
+    expect(apiMocks.putNotes).toHaveBeenCalledWith('two-sum', '# 我的思路')
+    expect(apiMocks.putNotes).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+  })
+
+  it('adopts the next problem\'s notes after the switch completes', async () => {
+    const wrapper = await mountWorkbench({ mainPct: 42, editorPct: 66 })
+    apiMocks.getProblem.mockResolvedValue(JSON.parse(JSON.stringify(NEXT_FIXTURE)))
+
+    await wrapper.find('[data-testid="notes-input"]').setValue('# 我的思路')
+    await wrapper.setProps({ qid: 'valid-parentheses' })
+    await settleWatchers()
+
+    expect(wrapper.find('[data-testid="notes-input"]').element.value).toBe('# next notes\n')
+    wrapper.unmount()
+  })
+
+  it('flushes a pending notes autosave on route leave', async () => {
+    const wrapper = await mountWorkbench({ mainPct: 42, editorPct: 66 })
+    await wrapper.find('[data-testid="notes-input"]').setValue('# 离开前最后的想法')
+
+    expect(routerMocks.routeLeaveHooks.length).toBeGreaterThan(0)
+    routerMocks.routeLeaveHooks.forEach((hook) => hook(undefined, undefined, () => {}))
+    expect(apiMocks.putNotes).toHaveBeenCalledWith('two-sum', '# 离开前最后的想法')
+    wrapper.unmount()
+  })
+
+  it('saves the cases draft through the testcases endpoint', async () => {
+    const wrapper = await mountWorkbench({ mainPct: 42, editorPct: 66 })
+
+    await wrapper.find('[data-testid="cases-input"]').setValue('1 2\n3')
+    await wrapper.find('[data-testid="cases-save"]').trigger('click')
+    await flushPromises()
+
+    expect(apiMocks.putTestcases).toHaveBeenCalledWith('two-sum', '1 2\n3')
+    expect(wrapper.find('[data-testid="cases-saved"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('shows the judging indicator while a run is in flight and hides it after', async () => {
+    let resolveRun
+    apiMocks.judgeRun.mockImplementation(
+      () => new Promise((resolve) => { resolveRun = resolve })
+    )
+    const wrapper = await mountWorkbench({ mainPct: 42, editorPct: 66 })
+
+    await wrapper.find('[data-testid="run-btn"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="judging-indicator"]').exists()).toBe(true)
+
+    resolveRun({ status_key: 'accepted', mode: 'run' })
+    await flushPromises()
+    expect(wrapper.find('[data-testid="judging-indicator"]').exists()).toBe(false)
     wrapper.unmount()
   })
 })

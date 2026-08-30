@@ -4,13 +4,15 @@ import { onBeforeRouteLeave } from 'vue-router'
 
 import CodeEditor from '../components/CodeEditor.vue'
 import AiChatSidebar from '../components/AiChatSidebar.vue'
+import CasesPanel from '../components/CasesPanel.vue'
+import JudgingIndicator from '../components/JudgingIndicator.vue'
 import JudgeResultPanel from '../components/JudgeResultPanel.vue'
 import PageHeader from '../components/PageHeader.vue'
+import ProblemMetaRow from '../components/ProblemMetaRow.vue'
+import ProblemStatement from '../components/ProblemStatement.vue'
 import { api } from '../api'
 import { userFacingError } from '../utils/errors'
-import { difficultyLabel } from '../utils/difficulty'
 import { LANGUAGE_OPTIONS } from '../utils/languages'
-import { makeMarkdown } from '../utils/markdown'
 import { STORAGE_KEYS, readJsonStorage, writeJsonStorage } from '../utils/storage'
 import { useI18nStore } from '../stores/i18n'
 import { useToastStore } from '../stores/toast'
@@ -20,8 +22,6 @@ const props = defineProps({ qid: { type: String, required: true } })
 
 const i18n = useI18nStore()
 const toast = useToastStore()
-
-const md = makeMarkdown()
 
 const SPLIT_KEY = STORAGE_KEYS.workbenchSplit
 
@@ -35,26 +35,7 @@ const code = ref('')
 const lang = ref('cpp')
 const languages = LANGUAGE_OPTIONS
 const switchingLang = ref(false)
-const statementHtml = ref('')
-
 const useLocalCases = ref(false)
-const casesOpen = ref(true)
-const casesDraft = ref('')
-const casesSaving = ref(false)
-const casesSavedAt = ref('')
-
-const notesDraft = ref('')
-const notesSavedAt = ref('')
-let notesTimer = null
-
-const favorite = ref(false)
-
-// difficulty enums render localized like everywhere else; unknown values
-// fall back to the raw enum instead of an empty chip
-
-function notifyActionError(err) {
-  toast.error({ text: userFacingError(err) })
-}
 
 const inflightRun = ref(false)
 const inflightSubmit = ref(false)
@@ -67,23 +48,12 @@ const judgingBusy = computed(
   () => inflightRun.value || inflightSubmit.value || switchingLang.value
 )
 const verdict = ref(null)
-
+// the elapsed-time indicator itself lives in JudgingIndicator; the workbench
+// only owns the on/off state
 const judgingActive = ref(false)
-const judgingSeconds = ref(0)
-let judgingTimer = null
 
-function startJudgingIndicator() {
-  judgingActive.value = true
-  judgingSeconds.value = 0
-  clearInterval(judgingTimer)
-  judgingTimer = setInterval(() => (judgingSeconds.value += 1), 1000)
-}
-
-function stopJudgingIndicator() {
-  judgingActive.value = false
-  clearInterval(judgingTimer)
-  judgingTimer = null
-}
+const favorite = ref(false)
+const statementRef = ref(null)
 
 const restoreCandidate = ref(null)
 const showRestoreBar = ref(false)
@@ -205,10 +175,7 @@ async function loadProblem() {
         ? data.language
         : data.languages_available[0] || 'cpp'
     code.value = data.code || ''
-    casesDraft.value = data.testcases || ''
-    notesDraft.value = data.notes || ''
     favorite.value = Boolean(data.favorite)
-    statementHtml.value = md.render(data.statement_markdown || '')
 
     const snap = loadSnapshot(props.qid, lang.value)
     if (
@@ -323,36 +290,6 @@ function discardDraft() {
   showRestoreBar.value = false
 }
 
-async function saveCases() {
-  casesSaving.value = true
-  try {
-    await api.putTestcases(props.qid, casesDraft.value)
-    casesSavedAt.value = new Date().toLocaleTimeString()
-  } catch (err) {
-    notifyActionError(err)
-  } finally {
-    casesSaving.value = false
-  }
-}
-
-function scheduleNotesSave() {
-  clearTimeout(notesTimer)
-  notesTimer = setTimeout(flushNotesSave, 1200)
-}
-
-async function flushNotesSave(qid = props.qid) {
-  clearTimeout(notesTimer)
-  notesTimer = null
-  try {
-    await api.putNotes(qid, notesDraft.value)
-    notesSavedAt.value = new Date().toLocaleTimeString()
-  } catch {
-    /* transient; the user can retry by editing again */
-  }
-}
-
-watch(notesDraft, () => scheduleNotesSave())
-
 async function toggleFavorite() {
   const next = !favorite.value
   favorite.value = next
@@ -364,12 +301,18 @@ async function toggleFavorite() {
   }
 }
 
+// transient failures surface as toasts; the workbench stays alive and the
+// user keeps their in-progress code visible
+function notifyActionError(err) {
+  toast.error({ text: userFacingError(err) })
+}
+
 async function runCode() {
   if (judgingBusy.value) return
   inflightRun.value = true
   verdict.value = null
   clearTimeout(autosaveTimer)
-  startJudgingIndicator()
+  judgingActive.value = true
   try {
     await api.putSolution(props.qid, lang.value, code.value)
     verdict.value = await api.judgeRun({
@@ -382,7 +325,7 @@ async function runCode() {
     notifyActionError(err)
   } finally {
     inflightRun.value = false
-    stopJudgingIndicator()
+    judgingActive.value = false
   }
 }
 
@@ -391,7 +334,7 @@ async function submitCode() {
   inflightSubmit.value = true
   verdict.value = null
   clearTimeout(autosaveTimer)
-  startJudgingIndicator()
+  judgingActive.value = true
   try {
     await api.putSolution(props.qid, lang.value, code.value)
     verdict.value = await api.judgeSubmit({
@@ -408,7 +351,7 @@ async function submitCode() {
     notifyActionError(err)
   } finally {
     inflightSubmit.value = false
-    stopJudgingIndicator()
+    judgingActive.value = false
   }
 }
 
@@ -427,11 +370,8 @@ onBeforeRouteLeave(() => {
     flushSave()
   }
   writeSnapshotNow()
-  // the code buffer had a flush path here; the notes debounce was only ever
-  // cancelled, silently dropping the last keystrokes on every navigation
-  if (notesTimer) {
-    flushNotesSave()
-  }
+  // pending notes flush on their own: ProblemStatement registers its own
+  // route-leave guard with the same contract
 })
 
 function onBeforeUnload() {
@@ -455,23 +395,20 @@ watch(
     // the previous problem's content at this point, so flushing with the
     // explicit qid keeps the last keystrokes instead of losing them (a bare
     // cancel used to drop them; letting props.qid be used would corrupt the
-    // next problem's files - both halves of the fix are needed together)
+    // next problem's files - both halves of the fix are needed together).
+    // ProblemStatement flushes its notes debounce through the same contract.
     if (autosaveTimer) flushSave(prev)
     clearTimeout(autosaveTimer)
     autosaveTimer = null
     clearTimeout(snapshotTimer)
     snapshotTimer = null
     saveSnapshot(prev, lang.value, code.value)
-    if (notesTimer) flushNotesSave(prev)
-    clearTimeout(notesTimer)
-    notesTimer = null
+    statementRef.value?.flushPendingNotes(prev)
     verdict.value = null
     loadError.value = ''
     showRestoreBar.value = false
     restoreCandidate.value = null
-    statementHtml.value = ''
-    notesSavedAt.value = ''
-    stopJudgingIndicator()
+    judgingActive.value = false
     loadProblem()
   }
 )
@@ -481,8 +418,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKeydown)
   clearTimeout(autosaveTimer)
   clearTimeout(snapshotTimer)
-  clearTimeout(notesTimer)
-  stopJudgingIndicator()
+  judgingActive.value = false
 })
 </script>
 
@@ -516,66 +452,23 @@ onBeforeUnmount(() => {
 
       <PageHeader :title="problem.title_cn || problem.title_en || problem.slug">
         <template #subtitle>
-          <span class="meta-row">
-            <button
-              class="fav-btn"
-              :class="{ active: favorite }"
-              type="button"
-              :title="favorite ? i18n.t('fav_remove') : i18n.t('fav_add')"
-              data-testid="workbench-fav"
-              @click="toggleFavorite"
-            >
-              {{ favorite ? '★' : '☆' }}
-            </button>
-            <RouterLink
-              v-if="problem.difficulty"
-              class="chip chip-link"
-              :class="['easy', 'medium', 'hard'].includes(problem.difficulty) ? `chip-${problem.difficulty}` : ''"
-              :to="{ path: '/problems', query: { difficulty: problem.difficulty } }"
-            >
-              {{ difficultyLabel(problem.difficulty, problem.difficulty) }}
-            </RouterLink>
-            <span v-if="problem.paid_only" class="chip">★</span>
-            <RouterLink
-              v-for="tag in (problem.tags || []).slice(0, 6)"
-              :key="tag.slug"
-              class="chip chip-link"
-              :to="{ path: '/problems', query: { tag: tag.slug } }"
-            >
-              {{ tag.name_zh || tag.name_en }}
-            </RouterLink>
-            <code class="slug-code">#{{ problem.slug }}</code>
-          </span>
+          <ProblemMetaRow
+            :problem="problem"
+            :favorite="favorite"
+            @toggle-favorite="toggleFavorite"
+          />
         </template>
       </PageHeader>
 
       <div class="wb" :class="{ 'wb-dragging': dragActive }" data-testid="workbench">
         <section ref="leftPaneRef" class="pane left-pane" :style="{ width: split.mainPct + '%' }">
-          <div class="card pane-card">
-            <h2>{{ i18n.t('problem_statement') }}</h2>
-            <div class="statement" v-html="statementHtml"></div>
-          </div>
-          <details v-if="(problem.hints || []).length" class="card hints-card">
-            <summary>{{ i18n.t('hints_toggle', { count: (problem.hints || []).length }) }}</summary>
-            <ul>
-              <li v-for="(hint, index) in problem.hints" :key="index">{{ hint }}</li>
-            </ul>
-          </details>
-
-          <details class="card notes-card">
-            <summary>{{ i18n.t('notes_title') }}</summary>
-            <p class="hint-text notes-hint">
-              {{ i18n.t('notes_hint') }}
-              <span v-if="notesSavedAt" data-testid="notes-saved">· {{ i18n.t('notes_saved') }} {{ notesSavedAt }}</span>
-            </p>
-            <textarea
-              v-model="notesDraft"
-              class="input notes-input"
-              rows="6"
-              data-testid="notes-input"
-              :placeholder="i18n.t('notes_placeholder')"
-            ></textarea>
-          </details>
+          <ProblemStatement
+            ref="statementRef"
+            :qid="props.qid"
+            :markdown="problem.statement_markdown || ''"
+            :hints="problem.hints || []"
+            :notes="problem.notes || ''"
+          />
         </section>
 
         <div
@@ -642,48 +535,25 @@ onBeforeUnmount(() => {
           ></div>
 
           <div class="cases-zone">
-            <details class="card cases-card" :open="casesOpen" @toggle="casesOpen = $event.target.open">
-              <summary>{{ i18n.t('custom_cases') }}</summary>
-              <p class="hint-text">{{ i18n.t('custom_cases_hint') }}</p>
-              <textarea
-                v-model="casesDraft"
-                class="input cases-input mono"
-                rows="5"
-                spellcheck="false"
-                data-testid="cases-input"
-              ></textarea>
-              <div class="actions-row">
-                <button
-                  class="btn btn-primary"
-                  type="button"
-                  :disabled="casesSaving"
-                  @click="saveCases"
-                >
-                  {{ i18n.t('save_cases') }}
-                </button>
-                <span v-if="casesSavedAt" class="saved-hint">{{ i18n.t('cases_saved') }} · {{ casesSavedAt }}</span>
-              </div>
-            </details>
+            <CasesPanel :qid="props.qid" :testcases="problem.testcases || ''" />
           </div>
         </section>
       </div>
 
-      <div v-if="judgingActive" class="card judging-card" data-testid="judging-indicator">
-        <span class="judging-dot"></span>
-        <span>{{ i18n.t('judging_in_progress') }}</span>
-        <span class="judging-seconds">{{ judgingSeconds }}s</span>
-        <span v-if="inflightSubmit" class="hint-text">{{ i18n.t('judging_submit_hint') }}</span>
-      </div>
+      <JudgingIndicator :active="judgingActive" :submitting="inflightSubmit" />
 
       <JudgeResultPanel v-if="verdict" :verdict="verdict" />
     </template>
 
-      <AiChatSidebar
-        v-if="problem && problem.supported !== false"
-        :qid="problem.slug || props.qid"
-        :get-code="() => code"
-        :code-lang="lang"
-      />
+    <!-- outside the loading/error branches on purpose: once a problem has
+         loaded, the floating coach panel survives workbench reloads and
+         problem switches instead of flickering away with the page content -->
+    <AiChatSidebar
+      v-if="problem && problem.supported !== false"
+      :qid="problem.slug || props.qid"
+      :get-code="() => code"
+      :code-lang="lang"
+    />
   </section>
 </template>
 
@@ -710,51 +580,8 @@ onBeforeUnmount(() => {
   border-color: var(--accent);
 }
 
-.meta-row {
-  align-items: center;
-  display: inline-flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-}
-
-.chip-link:hover {
-  border-color: var(--accent);
-  color: var(--accent);
-}
-
-.slug-code {
-  color: var(--gray-neutral);
-  font-size: var(--font-size-caption);
-}
-
-.fav-btn {
-  background: transparent;
-  border: none;
-  color: var(--gray-neutral);
-  cursor: pointer;
-  font-size: var(--font-size-title);
-  line-height: 1;
-  padding: 0;
-}
-
-.fav-btn:hover,
-.fav-btn.active {
-  color: var(--warn);
-}
-
-.notes-card summary {
-  color: var(--gray-neutral);
-  cursor: pointer;
-  font-size: var(--font-size-caption);
-}
-
-.notes-hint {
-  margin: var(--space-2) 0;
-}
-
-.notes-input {
-  resize: vertical;
-  width: 100%;
+.btn-sm {
+  padding: var(--space-1) var(--space-4);
 }
 
 .wb {
@@ -816,49 +643,10 @@ onBeforeUnmount(() => {
   background: var(--accent);
 }
 
-.pane-card,
-.hints-card,
-.editor-card,
-.cases-card {
+.editor-card {
   display: flex;
   flex-direction: column;
   min-height: 0;
-}
-
-.statement {
-  overflow-y: auto;
-  text-align: left;
-}
-
-.statement :deep(p) {
-  margin: var(--space-3) 0;
-  text-align: left;
-}
-
-.statement :deep(pre) {
-  background: var(--bg-secondary);
-  border-radius: var(--radius-card);
-  overflow-x: auto;
-  padding: var(--space-3) var(--space-4);
-}
-
-.statement :deep(code) {
-  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-  font-size: var(--font-size-caption);
-}
-
-.statement :deep(img) {
-  max-width: 100%;
-}
-
-.hints-card summary {
-  color: var(--gray-neutral);
-  cursor: pointer;
-}
-
-.hints-card ul {
-  margin: var(--space-3) 0 0;
-  padding-left: var(--space-6);
 }
 
 .editor-zone {
@@ -921,63 +709,9 @@ onBeforeUnmount(() => {
   gap: var(--space-1);
 }
 
-.btn-sm {
-  padding: var(--space-1) var(--space-4);
-}
-
 .cases-zone {
   display: flex;
   flex-direction: column;
   min-height: 140px;
-}
-
-.cases-card summary {
-  color: var(--gray-neutral);
-  cursor: pointer;
-}
-
-.hint-text {
-  color: var(--gray-neutral);
-  font-size: var(--font-size-caption);
-  margin: var(--space-3) 0;
-}
-
-.cases-input {
-  width: 100%;
-}
-
-.saved-hint {
-  color: var(--accent);
-  font-size: var(--font-size-caption);
-}
-
-.judging-card {
-  align-items: center;
-  color: var(--text-primary);
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-3);
-  margin-top: var(--space-4);
-  padding: var(--space-3) var(--space-4);
-}
-
-.judging-dot {
-  animation: judging-pulse 1s infinite;
-  background: var(--accent);
-  border-radius: 50%;
-  display: inline-block;
-  height: 8px;
-  width: 8px;
-}
-
-.judging-seconds {
-  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-  min-width: 3ch;
-}
-
-@keyframes judging-pulse {
-  50% {
-    opacity: 0.3;
-  }
 }
 </style>
