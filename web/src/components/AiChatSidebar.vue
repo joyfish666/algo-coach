@@ -1,10 +1,11 @@
 <script setup>
-import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { nextTick, ref, watch } from 'vue'
 
 import { api } from '../api'
 import { userFacingError } from '../utils/errors'
 import { makeMarkdown } from '../utils/markdown'
-import { STORAGE_KEYS, readJsonStorage, writeJsonStorage } from '../utils/storage'
+import { useFloatingPanel } from '../utils/floatingPanel'
+import { STORAGE_KEYS } from '../utils/storage'
 import { useI18nStore } from '../stores/i18n'
 import { useStatusStore } from '../stores/status'
 
@@ -35,97 +36,16 @@ if (!status.loaded) {
 // and report renderers keep CommonMark paragraph rules).
 const md = makeMarkdown({ breaks: true })
 
-const POS_KEY = STORAGE_KEYS.aiPos
+const { open, pos, panelEl, toggle, startDrag } = useFloatingPanel({
+  id: 'ai',
+  posKey: STORAGE_KEYS.panelPos,
+})
 
-const open = ref(false)
 const messages = ref([])
 const draft = ref('')
 const pending = ref(false)
 const attachCode = ref(false)
 const listEl = ref(null)
-const panelEl = ref(null)
-
-function readPos() {
-  const raw = readJsonStorage(POS_KEY)
-  if (raw && typeof raw.x === 'number' && typeof raw.y === 'number') return raw
-  return null
-}
-
-const pos = ref(readPos())
-
-let dragOffset = null
-
-function clamp(x, y) {
-  // measure the live panel instead of hardcoding its CSS size, so style and
-  // logic can never drift apart when the layout changes
-  const width = panelEl.value?.offsetWidth || 340
-  const height = panelEl.value?.offsetHeight || 520
-  const maxX = window.innerWidth - width - 8
-  const maxY = window.innerHeight - height - 8
-  return {
-    x: Math.min(Math.max(8, x), Math.max(8, maxX)),
-    y: Math.min(Math.max(8, y), Math.max(8, maxY)),
-  }
-}
-
-// a panel dragged on a larger window (or restored from storage after a
-// resolution change) must not stay stranded off-screen until the next drag
-function reclampToViewport() {
-  if (!open.value || !pos.value) return
-  pos.value = clamp(pos.value.x, pos.value.y)
-}
-
-onMounted(() => {
-  window.addEventListener('resize', reclampToViewport)
-})
-
-function onGlobalKeydown(event) {
-  if (event.key === 'Escape' && !event.isComposing) {
-    open.value = false
-  }
-}
-
-function startDrag(event) {
-  if (event.target.closest('.head-actions')) return
-  event.preventDefault()
-  const rect = panelEl.value?.getBoundingClientRect()
-  const fallbackWidth = rect?.width || 340
-  const current = rect
-    ? { x: rect.left, y: rect.top }
-    : { x: window.innerWidth - fallbackWidth - 24, y: 24 }
-  dragOffset = { dx: event.clientX - current.x, dy: event.clientY - current.y }
-  document.body.style.userSelect = 'none'
-  window.addEventListener('mousemove', onDragMove)
-  window.addEventListener('mouseup', endDrag)
-}
-
-function onDragMove(event) {
-  if (!dragOffset) return
-  pos.value = clamp(event.clientX - dragOffset.dx, event.clientY - dragOffset.dy)
-}
-
-function endDrag() {
-  dragOffset = null
-  document.body.style.userSelect = ''
-  window.removeEventListener('mousemove', onDragMove)
-  window.removeEventListener('mouseup', endDrag)
-  if (pos.value) writeJsonStorage(POS_KEY, pos.value)
-}
-
-onBeforeUnmount(() => {
-  if (dragOffset) endDrag()
-  window.removeEventListener('resize', reclampToViewport)
-  window.removeEventListener('keydown', onGlobalKeydown)
-})
-
-watch(open, (value) => {
-  if (value) {
-    reclampToViewport()
-    window.addEventListener('keydown', onGlobalKeydown)
-  } else {
-    window.removeEventListener('keydown', onGlobalKeydown)
-  }
-})
 
 // the workbench component is reused across /problem/:qid navigations, so a
 // qid change would otherwise keep the previous problem's conversation here
@@ -143,10 +63,6 @@ watch(
 function clearConversation() {
   if (pending.value || !messages.value.length) return
   messages.value = []
-}
-
-async function toggle() {
-  open.value = !open.value
 }
 
 function scrollToEnd() {
@@ -209,6 +125,19 @@ function onEnter(event) {
 </script>
 
 <template>
+  <button
+    class="fab ai-fab"
+    :class="{ active: open }"
+    type="button"
+    :title="i18n.t('ai_title')"
+    :aria-label="i18n.t('ai_title')"
+    :aria-pressed="open ? 'true' : 'false'"
+    data-testid="ai-open"
+    @click="toggle"
+  >
+    {{ i18n.t('ai_open') }}
+  </button>
+
   <aside
     v-if="open"
     ref="panelEl"
@@ -282,51 +211,48 @@ function onEnter(event) {
       </button>
     </footer>
   </aside>
-
-  <button
-    v-else
-    class="fab"
-    type="button"
-    :title="i18n.t('ai_title')"
-    data-testid="ai-open"
-    @click="toggle"
-  >
-    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M12 3.5c2.2 2.8 4.4 4.2 7.5 5-3.1 0.8-5.3 2.2-7.5 5-2.2-2.8-4.4-4.2-7.5-5 3.1-0.8 5.3-2.2 7.5-5z" />
-      <path d="M18.5 15.5c0.9 1.2 1.8 2.1 3.2 2.1-1.3 0.3-2.3 0.9-3.2 2.1-0.9-1.2-1.9-1.8-3.2-2.1 1.3-0.3 2.3-0.9 3.2-2.1z" />
-    </svg>
-    <span class="fab-label">{{ i18n.t('ai_open') }}</span>
-  </button>
 </template>
 
 <style scoped>
+/* top slot of the button stack; the notes circle sits one slot below (see
+   NotesPanel) so the two form one vertical group on the right edge */
+.ai-fab {
+  bottom: calc(var(--space-6) + 64px);
+}
+
 .fab {
   align-items: center;
   background: var(--accent);
   border: none;
-  border-radius: var(--radius-pill);
-  bottom: var(--space-6);
+  border-radius: 50%;
   box-shadow: var(--shadow-card);
   color: #ffffff;
   cursor: pointer;
   display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: var(--space-3);
+  font-size: 17px;
+  font-weight: 700;
+  height: 52px;
+  justify-content: center;
+  letter-spacing: 0.02em;
   position: fixed;
   right: var(--space-6);
+  width: 52px;
   z-index: 39;
 }
 
-.fab-label {
-  font-size: 10px;
-  font-weight: 600;
+.fab:hover,
+.fab.active {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
 }
 
 .panel {
   display: flex;
   flex-direction: column;
-  height: calc(100vh - 120px);
+  /* the default corner hosts the two circular buttons below (top slot starts
+     ~140px up): stop the panel short of them so it never covers its own
+     toggle; a dragged position is the user's call */
+  height: calc(100vh - 176px);
   max-width: 380px;
   position: fixed;
   right: var(--space-6);
@@ -502,6 +428,26 @@ function onEnter(event) {
 
 .md :deep(pre code) {
   font-size: inherit;
+}
+
+/* assistant answers frequently carry comparison tables - same grid treatment
+   as the statement renderer */
+.md :deep(table) {
+  border-collapse: collapse;
+  margin: var(--space-2) 0;
+}
+
+.md :deep(th),
+.md :deep(td) {
+  border: 1px solid var(--border-subtle);
+  padding: var(--space-1) var(--space-2);
+  text-align: left;
+  word-break: break-word;
+}
+
+.md :deep(th) {
+  background: var(--bg-secondary);
+  font-weight: 600;
 }
 
 @keyframes pulse {

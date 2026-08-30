@@ -2,7 +2,7 @@
  * Every localStorage key the app uses, plus safe read/write helpers.
  *
  * A key registry documents the storage contract in one place: lang, theme,
- * debug, density, workbench-split and ai-pos are preferences that SURVIVE
+ * debug, density, workbench-split and panel-pos are preferences that SURVIVE
  * "erase all local data" (they are UI state, not practice data); the
  * algocoach-snapshot:* keys are code drafts and are purged by
  * purgeAllSnapshots() as part of the erase flow.
@@ -13,7 +13,11 @@ export const STORAGE_KEYS = Object.freeze({
   debug: 'algocoach-debug',
   density: 'algocoach-density',
   workbenchSplit: 'algocoach-workbench-split',
-  aiPos: 'algocoach-ai-pos',
+  // one shared position for both floating panels (AI coach, notes): they are
+  // mutually exclusive and open at the same spot. A dragged AI panel used to
+  // persist under 'algocoach-ai-pos'; useFloatingPanel reads that as a legacy
+  // fallback.
+  panelPos: 'algocoach-panel-pos',
   snapshotPrefix: 'algocoach-snapshot:',
   snapshotIndex: 'algocoach-snapshot-index',
 })

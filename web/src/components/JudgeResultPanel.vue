@@ -8,6 +8,10 @@ const props = defineProps({
   verdict: { type: Object, required: true },
 })
 
+// run/submit results persist until the next action; an explicit close lets
+// the user reclaim the workbench space without running anything
+const emit = defineEmits(['close'])
+
 const i18n = useI18nStore()
 
 const statusKey = computed(() => props.verdict.status_key || 'unknown')
@@ -60,6 +64,16 @@ const runtimeError = computed(() => (statusKey.value === 'runtime_error'
 
 <template>
   <div class="card result-panel" data-testid="judge-result">
+    <button
+      class="close-btn"
+      type="button"
+      :title="i18n.t('dismiss')"
+      :aria-label="i18n.t('dismiss')"
+      data-testid="judge-result-close"
+      @click="emit('close')"
+    >
+      ✕
+    </button>
     <div class="headline" :class="headlineClass" :data-internal="isInternalError ? '1' : undefined">{{ statusText }}</div>
 
     <p v-if="statusKey === 'unknown'" class="unknown-hint">
@@ -125,6 +139,26 @@ const runtimeError = computed(() => (statusKey.value === 'runtime_error'
 </template>
 
 <style scoped>
+.result-panel {
+  position: relative;
+}
+
+.close-btn {
+  background: transparent;
+  border: none;
+  color: var(--gray-neutral);
+  cursor: pointer;
+  font-size: var(--font-size-title);
+  line-height: 1;
+  position: absolute;
+  right: var(--space-4);
+  top: var(--space-4);
+}
+
+.close-btn:hover {
+  color: var(--text-primary);
+}
+
 .headline {
   font-size: var(--font-size-page);
   font-weight: 700;

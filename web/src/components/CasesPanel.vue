@@ -10,7 +10,11 @@ const props = defineProps({
   qid: { type: String, required: true },
   // the freshly loaded problem's stored testcases.txt content
   testcases: { type: String, default: '' },
+// lifted to the workbench so the divider drag can open the collapsed panel
+open: { type: Boolean, default: false },
 })
+
+defineEmits(['toggle'])
 
 const i18n = useI18nStore()
 const toast = useToastStore()
@@ -21,7 +25,6 @@ const toast = useToastStore()
 const draft = ref(props.testcases)
 const saving = ref(false)
 const savedAt = ref('')
-const open = ref(true)
 
 watch(
   () => props.testcases,
@@ -46,7 +49,7 @@ async function save() {
 </script>
 
 <template>
-  <details class="card cases-card" :open="open" @toggle="open = $event.target.open">
+  <details class="card cases-card" :open="open" @toggle="$emit('toggle', $event.target.open)">
     <summary>{{ i18n.t('custom_cases') }}</summary>
     <p class="hint-text">{{ i18n.t('custom_cases_hint') }}</p>
     <textarea
@@ -75,21 +78,33 @@ async function save() {
 .cases-card {
   display: flex;
   flex-direction: column;
+  max-height: 100%;
   min-height: 0;
+  overflow-y: auto;
+}
+
+/* without a divider-dragged height (--cases-h from the workbench) the open
+   card is content-sized, so the textarea and save row always show fully */
+.cases-card[open] {
+  height: var(--cases-h, auto);
 }
 
 .cases-card summary {
   color: var(--gray-neutral);
   cursor: pointer;
+  flex-shrink: 0;
 }
 
 .hint-text {
   color: var(--gray-neutral);
+  flex-shrink: 0;
   font-size: var(--font-size-caption);
   margin: var(--space-3) 0;
 }
 
 .cases-input {
+  flex: 1;
+  min-height: 96px;
   width: 100%;
 }
 
@@ -101,6 +116,7 @@ async function save() {
 .actions-row {
   align-items: center;
   display: flex;
+  flex-shrink: 0;
   flex-wrap: wrap;
   gap: var(--space-3);
   margin-top: var(--space-3);

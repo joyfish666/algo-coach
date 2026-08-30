@@ -273,6 +273,25 @@ onMounted(() => loadAnalyze(false))
   margin: var(--space-2) 0;
 }
 
+/* same table grid as the statement/AI-chat markdown renderers */
+.report :deep(table) {
+  border-collapse: collapse;
+  margin: var(--space-2) 0;
+}
+
+.report :deep(th),
+.report :deep(td) {
+  border: 1px solid var(--border-subtle);
+  padding: var(--space-1) var(--space-2);
+  text-align: left;
+  word-break: break-word;
+}
+
+.report :deep(th) {
+  background: var(--bg-secondary);
+  font-weight: 600;
+}
+
 .regenerate {
   margin-top: var(--space-3);
 }

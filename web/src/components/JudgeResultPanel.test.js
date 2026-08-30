@@ -46,6 +46,12 @@ describe('JudgeResultPanel', () => {
     expect(wrapper.find('.headline').classes()).toContain('is-unknown')
   })
 
+  it('emits close when the close button is clicked', async () => {
+    const wrapper = mountPanel({ status_key: 'accepted' })
+    await wrapper.find('[data-testid="judge-result-close"]').trigger('click')
+    expect(wrapper.emitted('close')).toHaveLength(1)
+  })
+
   it('hides the case counter when there are zero testcases', () => {
     // "0 / 0" used to render as a meaningless metric row
     const wrapper = mountPanel({

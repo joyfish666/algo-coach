@@ -4,6 +4,7 @@ import { onBeforeRouteLeave } from 'vue-router'
 
 import CodeEditor from '../components/CodeEditor.vue'
 import AiChatSidebar from '../components/AiChatSidebar.vue'
+import NotesPanel from '../components/NotesPanel.vue'
 import CasesPanel from '../components/CasesPanel.vue'
 import JudgingIndicator from '../components/JudgingIndicator.vue'
 import JudgeResultPanel from '../components/JudgeResultPanel.vue'
@@ -53,7 +54,7 @@ const verdict = ref(null)
 const judgingActive = ref(false)
 
 const favorite = ref(false)
-const statementRef = ref(null)
+const notesRef = ref(null)
 
 const restoreCandidate = ref(null)
 const showRestoreBar = ref(false)
@@ -76,11 +77,21 @@ async function setHydratingUntilFlushed() {
 const leftPaneRef = ref(null)
 const rightColRef = ref(null)
 const dragActive = ref(false)
+// lifted from CasesPanel so the divider drag can open the collapsed panel
+const casesOpen = ref(false)
 
 function readSplit() {
   const raw = readJsonStorage(SPLIT_KEY)
-  if (raw && typeof raw.mainPct === 'number' && typeof raw.editorPct === 'number') return raw
-  return { mainPct: 42, editorPct: 66 }
+  if (raw && typeof raw.mainPct === 'number') {
+    // the vertical split is gone: the editor always fills the space above
+    // the cases zone, and only an explicit user-dragged cases height is
+    // stored now (an old {mainPct, editorPct} shape degrades gracefully)
+    return {
+      mainPct: raw.mainPct,
+      casesHeight: typeof raw.casesHeight === 'number' ? raw.casesHeight : null,
+    }
+  }
+  return { mainPct: 42, casesHeight: null }
 }
 
 const split = ref(readSplit())
@@ -116,12 +127,15 @@ function applyDrag() {
   } else {
     const rect = rightColRef.value?.getBoundingClientRect()
     if (!rect) return
-    const minEditor = (220 / rect.height) * 100
-    const maxEditor = 100 - (150 / rect.height) * 100
-    split.value.editorPct = Math.min(
-      Math.max(minEditor, ((event.clientY - rect.top) / rect.height) * 100),
-      maxEditor
+    // the divider sizes the cases zone; the editor flexes to everything above
+    // it. Dragging also opens the collapsed panel so the handle always has
+    // visible feedback.
+    const minCases = 150
+    const maxCases = Math.max(minCases, rect.height - 260)
+    split.value.casesHeight = Math.round(
+      Math.min(Math.max(minCases, rect.bottom - event.clientY), maxCases)
     )
+    casesOpen.value = true
   }
 }
 
@@ -396,14 +410,14 @@ watch(
     // explicit qid keeps the last keystrokes instead of losing them (a bare
     // cancel used to drop them; letting props.qid be used would corrupt the
     // next problem's files - both halves of the fix are needed together).
-    // ProblemStatement flushes its notes debounce through the same contract.
+    // NotesPanel flushes its notes debounce through the same contract.
     if (autosaveTimer) flushSave(prev)
     clearTimeout(autosaveTimer)
     autosaveTimer = null
     clearTimeout(snapshotTimer)
     snapshotTimer = null
     saveSnapshot(prev, lang.value, code.value)
-    statementRef.value?.flushPendingNotes(prev)
+    notesRef.value?.flushPendingNotes(prev)
     verdict.value = null
     loadError.value = ''
     showRestoreBar.value = false
@@ -463,11 +477,8 @@ onBeforeUnmount(() => {
       <div class="wb" :class="{ 'wb-dragging': dragActive }" data-testid="workbench">
         <section ref="leftPaneRef" class="pane left-pane" :style="{ width: split.mainPct + '%' }">
           <ProblemStatement
-            ref="statementRef"
-            :qid="props.qid"
             :markdown="problem.statement_markdown || ''"
             :hints="problem.hints || []"
-            :notes="problem.notes || ''"
           />
         </section>
 
@@ -478,7 +489,7 @@ onBeforeUnmount(() => {
         ></div>
 
         <section ref="rightColRef" class="pane right-col">
-          <div class="editor-zone" :style="{ height: split.editorPct + '%' }">
+          <div class="editor-zone">
             <div class="card editor-card">
               <div class="editor-head">
                 <h2>{{ i18n.t('problem_editor') }}</h2>
@@ -534,15 +545,23 @@ onBeforeUnmount(() => {
             @mousedown="startDrag('y', $event)"
           ></div>
 
-          <div class="cases-zone">
-            <CasesPanel :qid="props.qid" :testcases="problem.testcases || ''" />
+          <div
+            class="cases-zone"
+            :style="split.casesHeight ? { '--cases-h': split.casesHeight + 'px' } : {}"
+          >
+            <CasesPanel
+              :qid="props.qid"
+              :testcases="problem.testcases || ''"
+              :open="casesOpen"
+              @toggle="casesOpen = $event"
+            />
           </div>
         </section>
       </div>
 
       <JudgingIndicator :active="judgingActive" :submitting="inflightSubmit" />
 
-      <JudgeResultPanel v-if="verdict" :verdict="verdict" />
+      <JudgeResultPanel v-if="verdict" :verdict="verdict" @close="verdict = null" />
     </template>
 
     <!-- outside the loading/error branches on purpose: once a problem has
@@ -554,12 +573,25 @@ onBeforeUnmount(() => {
       :get-code="() => code"
       :code-lang="lang"
     />
+    <NotesPanel
+      v-if="problem"
+      ref="notesRef"
+      :qid="problem.slug || props.qid"
+      :notes="problem.notes || ''"
+    />
   </section>
 </template>
 
 <style scoped>
+/* the workbench owns exactly one viewport: the page never scrolls; every
+   region that can overflow (statement, editor, judge result) scrolls inside
+   itself instead */
 .page-wide {
   max-width: none;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
 }
 
 .banner-warn,
@@ -586,8 +618,10 @@ onBeforeUnmount(() => {
 
 .wb {
   display: flex;
+  flex: 1;
   gap: 0;
-  min-height: calc(100vh - 220px);
+  min-height: 0;
+  overflow: hidden;
 }
 
 .wb-dragging * {
@@ -652,7 +686,10 @@ onBeforeUnmount(() => {
 .editor-zone {
   display: flex;
   flex-direction: column;
-  min-height: 180px;
+  /* the editor is the workbench's primary surface: it always stretches to
+     everything above the cases zone instead of splitting by percentage */
+  flex: 1;
+  min-height: 220px;
 }
 
 .editor-card {
@@ -712,6 +749,20 @@ onBeforeUnmount(() => {
 .cases-zone {
   display: flex;
   flex-direction: column;
-  min-height: 140px;
+  flex-shrink: 0;
+  /* content-sized: a thin bar when collapsed, the full card when expanded,
+     so the cases panel is never clipped by the fixed-height workbench. A
+     user-dragged height arrives as --cases-h; the cap keeps a stale large
+     height from starving the editor on a smaller window. */
+  max-height: calc(100% - 260px);
+}
+
+/* the judge result appears below the workbench: it shrinks to the space the
+   viewport grants and scrolls internally instead of pushing the page taller */
+:deep(.result-panel) {
+  flex: 0 1 auto;
+  margin-top: var(--space-4);
+  min-height: 0;
+  overflow-y: auto;
 }
 </style>

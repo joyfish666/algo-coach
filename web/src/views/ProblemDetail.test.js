@@ -190,10 +190,16 @@ describe('workbench layout', () => {
     wrapper.unmount()
   })
 
-  it('dragging the horizontal divider resizes the editor zone', async () => {
+  it('dragging the horizontal divider sizes and opens the cases zone', async () => {
     const wrapper = await mountWorkbench({ mainPct: 40, editorPct: 50 })
     const rightEl = wrapper.find('.right-col').element
-    rightEl.getBoundingClientRect = () => ({ left: 0, width: 500, top: 0, height: 2000 })
+    rightEl.getBoundingClientRect = () => ({
+      left: 0,
+      width: 500,
+      top: 0,
+      height: 2000,
+      bottom: 2000,
+    })
 
     await wrapper.find('[data-testid="divider-editor"]').trigger('mousedown')
     expect(document.body.style.cursor).toBe('row-resize')
@@ -201,7 +207,10 @@ describe('workbench layout', () => {
     document.dispatchEvent(new MouseEvent('mousemove', { clientX: 0, clientY: 1600 }))
     await raf()
     await flushPromises()
-    expect(wrapper.find('.editor-zone').attributes('style')).toContain('height: 80%')
+    // 2000 - 1600 = 400px of cases height; the editor flexes to the rest and
+    // the drag opens the collapsed panel so the handle has visible feedback
+    expect(wrapper.find('.cases-zone').attributes('style')).toContain('--cases-h: 400px')
+    expect(wrapper.find('[data-testid="cases-input"]').exists()).toBe(true)
 
     document.dispatchEvent(new MouseEvent('mouseup'))
     wrapper.unmount()
@@ -254,6 +263,7 @@ describe('workbench persistence contracts', () => {
     const wrapper = await mountWorkbench({ mainPct: 42, editorPct: 66 })
     apiMocks.getProblem.mockResolvedValue(JSON.parse(JSON.stringify(NEXT_FIXTURE)))
 
+    await wrapper.find('[data-testid="notes-open"]').trigger('click')
     await wrapper.find('[data-testid="notes-input"]').setValue('# 我的思路')
     await wrapper.setProps({ qid: 'valid-parentheses' })
     await settleWatchers()
@@ -267,6 +277,7 @@ describe('workbench persistence contracts', () => {
     const wrapper = await mountWorkbench({ mainPct: 42, editorPct: 66 })
     apiMocks.getProblem.mockResolvedValue(JSON.parse(JSON.stringify(NEXT_FIXTURE)))
 
+    await wrapper.find('[data-testid="notes-open"]').trigger('click')
     await wrapper.find('[data-testid="notes-input"]').setValue('# 我的思路')
     await wrapper.setProps({ qid: 'valid-parentheses' })
     await settleWatchers()
@@ -277,6 +288,7 @@ describe('workbench persistence contracts', () => {
 
   it('flushes a pending notes autosave on route leave', async () => {
     const wrapper = await mountWorkbench({ mainPct: 42, editorPct: 66 })
+    await wrapper.find('[data-testid="notes-open"]').trigger('click')
     await wrapper.find('[data-testid="notes-input"]').setValue('# 离开前最后的想法')
 
     expect(routerMocks.routeLeaveHooks.length).toBeGreaterThan(0)
