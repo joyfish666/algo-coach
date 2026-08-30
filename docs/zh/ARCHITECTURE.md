@@ -12,6 +12,11 @@ web (Vue 3 SPA)  ↔  server (FastAPI 传输层)  ↔  lc (核心业务层)  ↔
   同步轮询由应用级 sync store 持有，跨路由存活、页面刷新后自动重新接管进行中的后端同步；
   错误文案/难度 chip/判定文案/Markdown 渲染/localStorage 键名均由共享工具单点维护
   （utils/verdict.js · difficulty.js · errors.js · markdown.js · storage.js）。
+  答题工作台 ProblemDetail.vue 只保留编排逻辑（加载、程序化写入栅栏、自动保存/快照/
+  恢复条、判定门控、分割线拖拽、快捷键），题面+笔记（ProblemStatement）、自定义用例
+  （CasesPanel）、判定计时（JudgingIndicator）、标题元信息行（ProblemMetaRow）各为独立
+  组件；切换题目时未保存内容必须以**旧题号**冲刷，该契约由 ProblemDetail.test.js 的
+  持久化契约测试钉住。
 - **server/**：REST 传输层，按职责分模块——
   `app.py`（组合根：Origin/Host 守卫中间件、异常处理器、dist 托管与 SPA 回退）、
   `errors.py`（统一错误 envelope 与状态码映射）、`state.py`（进程级单例与按配置派生的

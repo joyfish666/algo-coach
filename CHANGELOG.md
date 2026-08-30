@@ -25,6 +25,10 @@ the full development history lives in the git log.
   (`utils/errors.js`, `utils/difficulty.js`, `utils/languages.js`,
   `utils/markdown.js`, `utils/storage.js`); settings API field list,
   env overrides and the masked view now derive from `lc.config.DEFAULTS`.
+- The answering workbench (`ProblemDetail.vue`, ~1000 lines) is split into
+  focused children (`ProblemStatement`, `CasesPanel`, `JudgingIndicator`,
+  `ProblemMetaRow`); the parent keeps orchestration only and the
+  data-loss-prevention flush contracts are pinned by new tests.
 
 ## [0.1.0] - 2026-08-29
 
