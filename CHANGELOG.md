@@ -25,11 +25,12 @@ the full development history lives in the git log.
 
 ### Changed
 
-- The problem-list filter bar stays on one row: the tag select no longer
-  sizes itself to its longest option (which used to push the density toggle
-  to a second line after a full sync), the search box grows only to a cap so
-  the action buttons keep breathing room at the row's end, and the toolbar
-  scrolls horizontally on very narrow windows.
+- The problem-list filter bar stays on one row: the filter selects drop the
+  "全部" prefix (状态 / 难度 / 标签 as placeholder-style labels, mirrored in
+  English) and each control gets a width fitted to its option text, so no
+  single oversized select pushes the density toggle to a second line; the
+  search box grows only to a cap, and on very narrow windows flex shrink
+  (not horizontal scrolling) absorbs the squeeze.
 - Backend structure (no behavior change): `server/api.py` split into a package —
   `app.py` (composition root), `errors.py` (one error envelope),
   `state.py` (process singletons), and `routers/` grouped by concern

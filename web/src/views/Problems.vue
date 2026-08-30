@@ -158,14 +158,14 @@ onMounted(() => {
         :placeholder="i18n.t('problems_search_placeholder')"
         data-testid="search-input"
       />
-      <select v-model="statusFilter" class="select" data-testid="status-select">
+      <select v-model="statusFilter" class="select status-select" data-testid="status-select">
         <option value="">{{ i18n.t('status_filter_all') }}</option>
         <option value="solved">{{ i18n.t('status_solved') }}</option>
         <option value="attempted">{{ i18n.t('status_attempted') }}</option>
         <option value="todo">{{ i18n.t('status_todo') }}</option>
         <option value="favorite">{{ i18n.t('filter_favorite') }}</option>
       </select>
-      <select v-model="difficulty" class="select" data-testid="difficulty-select">
+      <select v-model="difficulty" class="select difficulty-select" data-testid="difficulty-select">
         <option value="">{{ i18n.t('diff_all') }}</option>
         <option value="easy">{{ i18n.t('diff_easy') }}</option>
         <option value="medium">{{ i18n.t('diff_medium') }}</option>
@@ -177,7 +177,7 @@ onMounted(() => {
           {{ tag.name_zh || tag.name_en }} ({{ tag.count }})
         </option>
       </select>
-      <select v-model="sortMode" class="select" data-testid="sort-select">
+      <select v-model="sortMode" class="select sort-select" data-testid="sort-select">
         <option value="id">{{ i18n.t('sort_id') }}</option>
         <option value="recent">{{ i18n.t('sort_recent') }}</option>
       </select>
@@ -314,16 +314,31 @@ onMounted(() => {
 }
 
 .toolbar > .select {
-  /* compact uniform width instead of the option-driven intrinsic one; the
-     closed select clips its label, dropdown lists still show full text */
+  /* compact widths fitted to each control's option text (the closed select
+     clips its label; dropdown lists still show full text) instead of the
+     option-driven intrinsic width that blew the row up */
   flex: 0 1 auto;
   min-width: 0;
-  width: 100px;
 }
 
-/* widest filter: shows the selected tag name */
+/* 状态 / Status: longest option 已通过 / Attempted */
+.toolbar > .status-select {
+  width: 88px;
+}
+
+/* 难度 / Difficulty: 2-char options */
+.toolbar > .difficulty-select {
+  width: 76px;
+}
+
+/* 标签 / Tags: shows the selected tag name */
 .toolbar > .tag-select {
-  width: 136px;
+  width: 120px;
+}
+
+/* 按题号 / By number: longest option 最近练习 / Recent */
+.toolbar > .sort-select {
+  width: 100px;
 }
 
 .toolbar > .btn {
