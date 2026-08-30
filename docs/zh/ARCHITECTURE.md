@@ -77,7 +77,7 @@ submission_id 三条写入路径全覆盖（判题完成 / 超时 unknown 归档
 GET  /api/status                    配置状态/版本/站点信息/LLM 可用性（llm_configured，
                                     供 AI 面板与分析页共用门控）/同步进度快照
 POST /api/setup/validate-cookie     引导页即时校验
-GET  /api/heartbeat                 Web-UI 存活心跳（每个打开的标签页约 20s 一次）；
+GET  /api/heartbeat                 Web-UI 存活心跳（每个打开的标签页约 10s 一次）；
                                     cli --idle-exit 看门狗据此在最后一次页面关闭后
                                     按期限退出（同步进行中顺延），双击启动脚本依赖此机制
 GET  /api/settings                  读取（敏感字段脱敏：<16 字符全遮，否则仅回显尾 4 字符）

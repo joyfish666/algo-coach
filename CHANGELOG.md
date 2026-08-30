@@ -9,6 +9,54 @@ the full development history lives in the git log.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Statement tables render as tables**: the HTML->Markdown converter flushed
+  every `<tr>` as a standalone paragraph - tag-gap whitespace emitted a
+  phantom leading "|", rows kept no trailing pipe, and no delimiter row ever
+  appeared, so markdown-it rendered whole tables as literal text (e.g.
+  颠倒二进制位's 整数/二进制 tables). Rows are now GFM pipe rows with a
+  delimiter row after the first, pipes inside cells are escaped, and block
+  tags inside cells stay inline (`STATEMENT_VERSION` bumped to 3; stored
+  statements regenerate lazily on the next online open).
+- **Literal "\*\*1\*\*" inside inline code**: statements wrapping bold inside
+  a code span (`<code><strong>1</strong></code>`, e.g. 可被 K 整除的最小整数)
+  emitted `` `**1**` `` and the asterisks rendered literally. Emphasis that
+  opens inside an inline code span now drops its markers (the code font
+  already reads as emphasis).
+- The favorite toggle shows one consistent five-pointed star everywhere (SVG,
+  outline when unfavorited, filled when favorited) instead of the ★/☆ text
+  glyphs whose shape depended on the platform font.
+
+### Changed
+
+- **Notes became a floating sub-panel like the AI coach**: the notes card
+  under the statement moved into a draggable, Escape-closable floating panel
+  (same mechanics, autosave and flush contract as before), and both panels
+  now toggle from two identical accent circular buttons stacked on the right
+  edge (AI coach on top, notes below). Opening one closes the other since
+  they share the same screen corner, and both open at one shared, persisted
+  position (a pre-merge dragged AI-panel spot is adopted).
+- **The workbench owns one viewport**: the problem-detail page no longer
+  scrolls as a whole - the statement pane, editor and judge-result panel each
+  scroll internally when content outgrows the screen (a long 题面 scrolls
+  inside its card instead of pushing the page).
+- The vertical workbench split is gone: the editor always stretches to fill
+  the space above the cases zone. The custom-cases panel starts collapsed and,
+  when expanded, is content-sized so it always shows fully; the horizontal
+  divider now sizes (and opens) the cases zone instead.
+- Statement / AI-chat / report markdown tables render with a visible grid
+  (borders and a tinted header row) - pipe tables arrived borderless before.
+- Scrollbars are theme-aware everywhere (token-colored thumb, transparent
+  track): the browser-default light scrollbar no longer glares on the dark
+  statement pane.
+- The AI-coach launcher reads "AI" instead of the sparkle glyph; the two
+  floating-panel buttons share one accent circle style.
+- The judge-result panel gained a close button, so a finished run/submit can
+  be dismissed without running anything.
+- The web-UI keep-alive heartbeat is sent every 10s (was 20s) and the bundled
+  `start.bat` retires the server after 30s without one (was 2 minutes).
+
 ### Added
 
 - **Idle auto-exit**: every open web-UI tab sends a heartbeat (~every 20s);
