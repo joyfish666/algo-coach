@@ -35,6 +35,12 @@ the full development history lives in the git log.
 - CI: the wheel-packaging job never installed node_modules, so every run
   failed at its first step (`vite: not found`) since the job was
   introduced; `npm ci` now runs before the frontend build.
+- Tests are now physically isolated from the real data directory: conftest
+  redirects `ALGOCOACH_HOME` to a per-test temp directory by default. A
+  split test file had lost its environment-isolation fixture and its
+  data-wipe regression ran against the live `~/.algocoach`, erasing real
+  local data (recorded in PITFALLS); the safety net makes that class of
+  bug structurally impossible.
 
 ## [0.1.0] - 2026-08-29
 

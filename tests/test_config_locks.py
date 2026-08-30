@@ -17,6 +17,24 @@ from server import app as app_module
 ORIGIN = {"Origin": "http://localhost:5173"}
 
 
+@pytest.fixture(autouse=True)
+def isolated_env(tmp_path, monkeypatch):
+    """Every test here touches the data dir (the wipe test deletes it) - it
+    must never run against the real ~/.algocoach. The conftest safety net
+    already isolates ALGOCOACH_HOME; this explicit reset keeps the singletons
+    consistent with that directory swap."""
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("ALGOCOACH_HOME", str(home))
+    auth.reset_state()
+    from server import state
+
+    state.reset_app_state()
+    yield
+    auth.reset_state()
+    state.reset_app_state()
+
+
 @pytest.fixture
 def client():
     return TestClient(app_module.app, base_url="http://127.0.0.1:8000")
