@@ -9,8 +9,23 @@ the full development history lives in the git log.
 
 ## [Unreleased]
 
+### Added
+
+- **Idle auto-exit**: every open web-UI tab sends a heartbeat (~every 20s);
+  `coach --idle-exit MINUTES` retires the server once the last tab has been
+  closed for the deadline (a running problem sync defers the exit), so the
+  double-click `start.bat` launcher now closes its window with the site.
+  Plain `coach` keeps the previous always-on behavior.
+- **Windows launcher**: double-click `start.bat` starts the server from the
+  project venv and opens the browser; it verifies the one-time prerequisites
+  (package install, built frontend) and prints exactly what is missing.
+
 ### Changed
 
+- The problem-list filter bar stays on one row: the tag select no longer
+  sizes itself to its longest option (which used to push the density toggle
+  to a second line after a full sync); the search box is the only flexible
+  item and the toolbar scrolls horizontally on very narrow windows.
 - Backend structure (no behavior change): `server/api.py` split into a package —
   `app.py` (composition root), `errors.py` (one error envelope),
   `state.py` (process singletons), and `routers/` grouped by concern

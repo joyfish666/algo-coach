@@ -102,6 +102,9 @@ async function request(url, options = {}) {
 
 export const api = {
   getStatus: () => request('/api/status'),
+  // liveness ping for the --idle-exit watchdog: while any tab is open the
+  // server sees a beat and stays up; closing the last tab stops the beats
+  heartbeat: () => request('/api/heartbeat'),
   getSettings: () => request('/api/settings'),
   putSettings: (body) =>
     request('/api/settings', {

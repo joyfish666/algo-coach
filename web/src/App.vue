@@ -5,6 +5,7 @@ import { useRoute } from 'vue-router'
 import LanguageSwitch from './components/LanguageSwitch.vue'
 import ThemeSwitch from './components/ThemeSwitch.vue'
 import ToastHost from './components/ToastHost.vue'
+import { api } from './api'
 import {
   debugClear,
   debugCopyToClipboard,
@@ -38,13 +39,33 @@ function onAuthExpired() {
   authExpired.value = true
 }
 
+// Idle-exit liveness: the backend (started with --idle-exit, e.g. via
+// start.bat) shuts down when no heartbeat arrives for its deadline, so
+// closing the last tab retires the server. Browsers freeze background-tab
+// timers, which stops the interval - an immediate beat on refocus plus the
+// watchdog's grace window keeps a brief freeze from killing the server.
+let heartbeatTimer = null
+
+function sendHeartbeat() {
+  api.heartbeat().catch(() => {})
+}
+
+function onVisibilityChange() {
+  if (document.visibilityState === 'visible') sendHeartbeat()
+}
+
 onMounted(() => {
   theme.init()
   status.refresh().then(() => sync.adoptFromStatus(status.sync))
   window.addEventListener('algocoach:auth-expired', onAuthExpired)
+  sendHeartbeat()
+  heartbeatTimer = setInterval(sendHeartbeat, 20000)
+  document.addEventListener('visibilitychange', onVisibilityChange)
 })
 
 onBeforeUnmount(() => {
+  clearInterval(heartbeatTimer)
+  document.removeEventListener('visibilitychange', onVisibilityChange)
   window.removeEventListener('algocoach:auth-expired', onAuthExpired)
 })
 

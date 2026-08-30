@@ -171,7 +171,7 @@ onMounted(() => {
         <option value="medium">{{ i18n.t('diff_medium') }}</option>
         <option value="hard">{{ i18n.t('diff_hard') }}</option>
       </select>
-      <select v-model="tagSlug" class="select" data-testid="tag-select">
+      <select v-model="tagSlug" class="select tag-select" data-testid="tag-select">
         <option value="">{{ i18n.t('tag_all') }}</option>
         <option v-for="tag in tagOptions" :key="tag.slug" :value="tag.slug">
           {{ tag.name_zh || tag.name_en }} ({{ tag.count }})
@@ -294,16 +294,34 @@ onMounted(() => {
 }
 
 .toolbar {
+  /* one row, always: the tag <select> used to size itself to its longest
+     option text (hundreds of tag names after a full sync), which ate the
+     whole row and pushed the density toggle onto a second line */
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: var(--space-3);
   margin-bottom: var(--space-4);
+  overflow-x: auto;
   padding: var(--space-4);
 }
 
 .search {
+  /* the only flexible item: everything else keeps its intrinsic width */
   flex: 1;
-  min-width: 220px;
+  min-width: 160px;
+}
+
+.toolbar > .select,
+.toolbar > .btn {
+  flex: none;
+}
+
+.tag-select {
+  /* cap the option-driven intrinsic width; the closed select clips its
+     label (dropdown lists still show full option text) */
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 200px;
 }
 
 .problem-list {

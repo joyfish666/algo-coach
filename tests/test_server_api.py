@@ -672,3 +672,28 @@ def test_status_exposes_llm_configured(client):
     config.save(seed)
     body = client.get("/api/status").json()
     assert body["llm_configured"] is True
+
+
+# ---------------------------------------------------------------------------
+# web-UI liveness heartbeat (drives the cli --idle-exit watchdog)
+
+
+def test_heartbeat_endpoint_resets_idle_clock(client):
+    import time as time_module
+
+    from server import state
+
+    time_module.sleep(0.02)
+    elapsed_before = state.seconds_since_heartbeat()
+    assert client.get("/api/heartbeat").status_code == 200
+    assert state.seconds_since_heartbeat() < elapsed_before
+
+
+def test_reset_app_state_starts_a_fresh_idle_window():
+    import time as time_module
+
+    from server import state
+
+    time_module.sleep(0.02)
+    state.reset_app_state()
+    assert state.seconds_since_heartbeat() < 0.02

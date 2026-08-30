@@ -17,6 +17,7 @@ Locking discipline (see also lc.auth / lc.config):
 from __future__ import annotations
 
 import threading
+import time
 
 from lc import auth, problems
 from lc.archive import Archive
@@ -35,6 +36,29 @@ lifecycle_lock = threading.Lock()
 
 _archive_lock = threading.Lock()
 _archive: Archive | None = None
+
+# Web-UI liveness, consumed by the cli --idle-exit watchdog: every open tab
+# pings /api/heartbeat every ~20s, so "no heartbeat for N minutes" means the
+# last tab is gone (browser tab freezing pauses the timers too - the frontend
+# sends an immediate beat on refocus, and the watchdog grace absorbs short
+# freezes). Initialized at import so the idle window starts at server start.
+_heartbeat_lock = threading.Lock()
+_last_heartbeat = time.monotonic()
+
+
+def touch_heartbeat() -> None:
+    global _last_heartbeat
+    with _heartbeat_lock:
+        _last_heartbeat = time.monotonic()
+
+
+def seconds_since_heartbeat() -> float:
+    with _heartbeat_lock:
+        return time.monotonic() - _last_heartbeat
+
+
+def sync_running() -> bool:
+    return sync_engine.progress()["running"]
 
 
 def get_archive() -> Archive:
@@ -58,6 +82,8 @@ def reset_app_state() -> None:
     with _archive_lock:
         _archive = None
     sync_engine.reset()
+    # a data-directory swap starts a fresh idle window
+    touch_heartbeat()
 
 
 def create_adapter() -> LeetCodeCnAdapter:

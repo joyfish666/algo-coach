@@ -44,6 +44,15 @@ def get_status():
     }
 
 
+@router.get("/api/heartbeat")
+def heartbeat():
+    """Liveness ping from every open web-UI tab (~every 20s); the cli
+    --idle-exit watchdog shuts the server down once the age grows past the
+    deadline, so closing the last tab retires the process."""
+    state.touch_heartbeat()
+    return {"ok": True}
+
+
 class CookiePayload(BaseModel):
     cookie: str
 

@@ -181,6 +181,34 @@ def open_browser_when_ready(server, url):
     webbrowser.open(url)
 
 
+def start_idle_exit_watchdog(server, minutes: float) -> None:
+    """Shut down once the web UI goes quiet.
+
+    Every open tab pings /api/heartbeat; when no beat arrives for `minutes`,
+    the last tab is gone and a headless server has no reason to keep running
+    (double-click launches especially - the user asked the window to close
+    with the site). A running problem sync holds the exit: closing the tab
+    mid-sync must not truncate a 2-3 minute full rebuild.
+    """
+    from server import state
+
+    def watch():
+        deadline = minutes * 60
+        while not server.should_exit:
+            time.sleep(5)
+            if state.seconds_since_heartbeat() < deadline:
+                continue
+            if state.sync_running():
+                continue
+            print(
+                f"[coach] no web UI heartbeat for {minutes:g} min - shutting down"
+            )
+            server.should_exit = True
+            return
+
+    threading.Thread(target=watch, name="idle-exit-watchdog", daemon=True).start()
+
+
 def print_banner(url):
     console = Console()
     console.print(
@@ -209,6 +237,15 @@ def main(argv=None):
         help="do not open the browser automatically",
     )
     parser.add_argument("--debug", action="store_true", help="verbose logging")
+    parser.add_argument(
+        "--idle-exit",
+        type=float,
+        default=0.0,
+        metavar="MINUTES",
+        help="shut down automatically after N minutes without a web-UI "
+        "heartbeat, so closing the last browser tab retires the server "
+        "(0 disables; the bundled start.bat passes 2)",
+    )
     args = parser.parse_args(argv)
 
     host = "127.0.0.1"
@@ -282,6 +319,12 @@ def main(argv=None):
             args=(server, url),
             daemon=True,
         ).start()
+
+    # the idle clock starts at process start: the auto-opened browser begins
+    # heartbeating within seconds, and a tab that never opens lets the server
+    # retire after the deadline instead of lingering headless forever
+    if args.idle_exit > 0:
+        start_idle_exit_watchdog(server, args.idle_exit)
 
     print_banner(url)
     try:
