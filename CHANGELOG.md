@@ -9,6 +9,39 @@ the full development history lives in the git log.
 
 ## [Unreleased]
 
+### Added
+
+- **User-defined problem groups (practice plans)**: a new 分组 page (between
+  Problems and Daily) manages nestable, ordered groups that record slugs
+  only — never copies of problems. Groups nest up to 10 levels (a defensive
+  cap; moves are cycle-checked along the parent chain), a problem may live in
+  several groups, and item order is the plan: up/down moves keep it editable
+  in place. Entry points: the management page (recursive tree, per-group
+  export, add-by-search), a hover button on every problem-list row, and
+  group chips next to the workbench title (deep-linking to
+  `/groups?group=<id>`). The add-group picker renders the tree as a flat,
+  searchable path list ("2026 / 0830") with in-place membership toggles.
+  Plans travel as versioned share codes (`algocoach-groups:v1:…`, stdlib
+  zlib + urlsafe base64): export copies to the clipboard (fallback box on
+  failure); import recreates the tree as new top-level groups — same-named
+  roots get a numeric suffix, slugs missing from the local cache render as
+  "unresolved" and resolve after a problem-list sync. Stored in
+  `~/.algocoach/groups.json` under the favorites.json storage contract
+  (single lock, atomic replace, corrupt-tolerant load) and erased together
+  with "clear all local data".
+- **Group key-problem marks & collapsible tree**: every group item can be
+  marked as a key problem (bookmark toggle in the row's hover actions; marked
+  rows render a bolder title with an accent-colored sequence number, and the
+  group header shows the mark count). Marks live on the group document
+  (`marked` slug list, intersected with members), travel inside share codes
+  both ways, and are cleaned up when a marked problem is removed. Tree nodes
+  collapse/expand via the header chevron or by clicking the group name, with
+  the state persisted in localStorage; the workbench chip deep link expands
+  collapsed ancestors before scrolling to its target. The repository also
+  ships a ready-to-paste share code for the 代码随想录 practice plan
+  (12 sections / 173 problems after the study guide's order, its 148
+  article-introduced problems pre-marked as key) - documented in USAGE.
+
 ### Fixed
 
 - **Statement tables render as tables**: the HTML->Markdown converter flushed

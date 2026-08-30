@@ -62,6 +62,7 @@ Cookie 失效后任意页面会弹出底部横幅引导重新配置，也可在�
 | 路由 | 页面 | 说明 |
 |---|---|---|
 | `/problems` | 题库列表 | 「同步题库」拉取全量题库（4400+ 题，按限速约 2–3 分钟，请耐心等待）；状态（已通过/尝试过/未做/收藏）/难度/标签/关键词筛选、随机一题（在当前筛选结果的**免费题**内随机，全是付费题时会提示调整筛选）、紧凑/舒适密度切换；难度/标签筛选与 URL 参数联动，浏览器前进后退可还原 |
+| `/groups` | 分组管理 | 自定义刷题清单：分组可无限嵌套（防御上限 10 层）、组内题目按顺序排列，分组只记录题号不复制题目；条目可折叠（点组名或箭头，状态记忆），可标记「重点」（悬浮书签按钮，加粗+强调色显示）；每组可独立导出分享码（`algocoach-groups:v1:…`，自动复制到剪贴板，重点标记随码携带），也可粘贴他人分享码导入为新的顶级分组（未同步的题显示「未识别」，同步后自动恢复）；题库列表行悬浮按钮与工作台标题旁均可把当前题加入分组 |
 | `/problem/:qid` | 答题工作台 | 题面渲染 + CodeMirror 编辑器（语法高亮随浅色/暗色主题自动切换）+ Run/Submit + 自定义用例 + 笔记 + 收藏 + AI 对话侧边栏 |
 | `/daily` | 每日一题 | 今日题目卡片直达工作台 |
 | `/history` | 提交历史 | 本地归档的每一次提交：时间/题目/语言/结果（本地化文案，与工作台判定面板一致）/用时/内存，可按题目过滤；WA 对比与 CE/RE 详情可展开；筛选无结果与「从未提交」显示不同提示 |
@@ -69,6 +70,28 @@ Cookie 失效后任意页面会弹出底部横幅引导重新配置，也可在�
 | `/settings` | 设置 | 外观（界面语言/主题/调试模式）、默认刷题语言、**AI（LLM）卡片**（API Key / 接口地址 / 模型 / 思考模式，独立于 Cookie，带「测试连接」一键连通性探测）、Cookie 状态与管理、数据清除（进阶项 LLM 超时 `llm_timeout` 仍经 API 或 config.toml 设置，范围 [5, 600] 秒） |
 
 同步进度是全局的：同步进行中切换页面不会丢失进度显示，刷新页面后也会自动重新接管正在进行的后端同步。操作反馈统一出现在右上角 toast——成功提示几秒后自动消失，错误提示会驻留直到你关闭它（避免「失败了你却没看见」）。
+
+## 分组分享码
+
+分享码是分组树（组名、题目顺序、重点标记）的纯文本口令，格式为
+`algocoach-groups:v1:…`。在「分组」页点「导入分享码」粘贴即可导入为新的顶级
+分组；点每组的导出按钮或页头「导出全部」可生成自己的口令（自动复制到剪贴板，
+失败时会在文本框中展示）。分组只记录题号不复制题目，导入不会增加题库数据。
+
+本仓库内置**《代码随想录》刷题计划**的官方分享口令：12 个专题、173 题，顺序
+严格按 [leetcode-master](https://github.com/youngyangyang04/leetcode-master)
+的刷题总目录；攻略文章直接介绍的题目已标为「重点」（148 题），文章内嵌套的
+相关题目（如 27 移除元素之后的 26/283）保持未标记。复制下方口令，在
+「分组 → 导入分享码」粘贴即可一键导入：
+
+<details>
+<summary>点击展开《代码随想录》分享口令</summary>
+
+```text
+algocoach-groups:v1:eNrtWV9vFDcQ_y73jB-q9omvUvHg2_Xtmuzai-3N5UBIRSA1rWhRQYiqlVqqSi2qWopKHxCo9MskIfkW_c14d893uVxCKIKgKFLubI_t-fOb8czctZHPSlXL0cWPLowKZ9vGjy5-em1kZK1GF0c7L35-9fDGwXd39m4-3f3n_ujCyFdtQSSXLoyyUle5UybdsHf_yasXtxK60Vgb6WbCK-mykhauuLCFz01Z6Vw0yk1UFoS_0kqnMO1UbTeVUJWqlQnzibxtKp3JoLyYOFsLb11QuZDOyRmomOaqclZ5jMYy2_CNzJTwwWlTiMzWTTw_XuSFnQh56BBtdN3ibH0VO9sxz-NLjbWJa3UQ2gQrxtJvqOCTDVNtcjulLfE-uqfRTlailpjYElovT9G4bI3wpRZXS2VELsVMG3G5jcMqs5PRopIxqqXbUPkqtR7S22kFPcT4pesXBvMe3Hu5_9Oj1LzdvZU2YAwfPvQ8kIJy5XVh0lVmdVM5r5Zm_VQ2wljsgJZFI7Xzc7FMKHkt2l6ZnMTqNsImdFwWtDU0HaY2PdpDlRmpP2Uxm2WVYuGO1vBZlywx2-697d1nt5csFx1QGlk4SYZn7-_HxOEEqBayqoY5Yl-KAeK8Ds-qwV1WSiczYvcIvhli6xejl5SyaWbCtPVYOQxpOQLzE3xEEieNh7KMDeTRH8-X15lzWdzTcf9m3KUm-ePBq99_2Xn216IzRfwMKl6c6M7v5qbW5StNEkoAwORqi7nHYALEBWGzrHVQTKaWNjnVKEnhYYhfAGmAEsx693jfeE21e-f23u3PD-5u7z29vyJavbXX5UilrFLA6mjxtuPCiR1mha7OmnAJIvYebu88-_rg2x93tx-kiNB1EwUUV1rVKtF6sqgPZGPiZljmqW6ZSf08iYHxIZLyKgnsHDjzy4AJNif4gpoGJSnsbzErem01FvKQboIk-ZlRndOVXYpRyy16uSn02EZsQIEKzJjkaVpj0Q9P1sTAO89v7975Yu_hNyuSz-AU7nMKOFUOI0kcyIp8OSWwPqyn0Gb9egXRKnEKmojdlMzpooQhNJxkU6spVolUFopdhc5g9SZbQAIPPI4VjrqVdIWC35BJOMIqmZXdvZbuamzTVjALjGHUVui4aWx0zmEH-fDrUUdBtQE_YYl5P6trBbRk_URnf5GrBvECYi_SH1qeS5-kuEdszmwLIFHgrhQwyaJzisbxvZJ4efKlLQtQkaEkUg_sDfy3Y16jhBugLlnx3UodrTYJ-AdbDNnV2IaACMgrvJktQirFBV1m0X-NqsusgUu12YL2Yhzt0Slx8Gosr9k8eAftXoXzXt1LRlBAEsfoZJ41w4VJfBQWapV-J4cTigcrV3vzybG3VQuqXE8masgIxvxUsAprRpVZfUxlp4TzLs0jq5JaYk20KMgJKBeP1sYThrkiPIIkVwwu03EoO7aB8fqoLbAQu0aagIhg1xPjWKIpHKVGHeqOLx3fdVD8f4LAB-Pmb-TY5855tpwzLVW-_2Hv-Z-vHj9YKlUgLJ1LqZHn44Zh9xhwEqyo9hEpbdRKU1qj5nXq0u6V5zEckVXngBxB3wVNq306TxqHptAhyBFUfMz_qAqLrbDuWzzH4NBcZRA5Zpi0RqlbxpvQ86vbMEiWDvuqce4M4MEg73EzTm9wiDLxutxutLBEBSWvC3bnanwNNSaw3P_7t91_bx6GpfTc98qs3dDMxlQXRaVS5pJ41PcWKa6SBwdNgRQe0844mnmFygEqQbXBLF9u60YUxEHyPS7xkbFfyWE2ep-ckOE2kHcWgyYK6amC6YqKDPfM2MaIHRLOjmaPKeiCWAQlWiIjjmeiVJS_JnEu2r-71E59lID6FHhDKhtvJWOhFnIVOkTc_6DkF3GUbdOjAJn3WPFUjM0pEdizgeCmzWDyXBeacZG-CRl04uTaSu_cSu-PldJY_-Wjvc9u7P96a3f7bupUEz2G1OhrJKGm0hRZuDyPDWPICYPSM3hoqTUaahrSlXTYF1xBFVDOGCxvzCkOP1yLegBUUJvGmNQFvEp66g-QBqZsgXhBoIqyp8GiZ-AMLbPMatOZtC9jluLm5iJVDGjJT0MMYiQ-gwilbT2Vq-Oor3TYNZIXZ_Tx6D4p_o8nOhHV5gmIphoJIty4QkPEnJQ-UAtaRk-ZdAmU4YI_Ae1iKOgJ4GV4KVqo7mjaPmxUyhQx6U67sn0kmZ_ISdviES3Otnj8qH9n2LYrYpH2S7ty9PrAVVh-CbtUzgIxEVETJIfcmufmE5GoHL_e0X4ZjxqeaFQaQyvZJ2wvE_RcrAm651587sXnXnw2vDh9lL-6v__kJn4fSF_kXOoKD7mqmZs2Ipebm30h1zWhhT5ygT3KdYmGk_CKKRGw-8X-K7IaiEKJGRZLyGX5x8k1Mebd8rVQtr7cf_x8oTIAfGOw6n5Ca13GAI9RhdgZMjTt0XvJ16ewpznuOv39Bw1nulI=
+```
+
+</details>
 
 ## 工作台要点
 
@@ -91,6 +114,10 @@ Cookie 失效后任意页面会弹出底部横幅引导重新配置，也可在�
   即使它不是设置的默认刷题语言（比如用 Python 做完的题，重开就是 Python）。
 - **收藏**：题库列表行内 ☆ / 工作台标题旁星标均可切换，配合列表页「收藏」筛选
   形成个人错题本/重做清单。
+- **分组**：把题目按刷题顺序放进自定义分组（比如「两数之和」放进 0830，
+  0830 再放进 2026）。入口三处：分组管理页（树形增删改、上下移排序、
+  搜索加题）、题库列表行悬浮按钮、工作台标题旁。分组只记录 slug 不复制题目，
+  分享码分享的是「顺序」而非题目副本；同一题可以出现在多个分组里。
 - **AI 教练**：右下角悬浮球打开（`Esc` 关闭），按住标题栏可拖动到任意位置，
   窗口尺寸变化后自动回到可视范围内；对话上下文（当前题目 + 最近判定）自动附带，
   勾选「附带当前代码」可把编辑器内容一并交给 AI（并标注当前语言）；
