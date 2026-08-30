@@ -34,7 +34,7 @@ from rich.panel import Panel
 
 import lc
 from lc.config import INSTANCE_LOCK_NAME, app_dir
-from lc.logutil import setup_logging
+from lc.logutil import logger, setup_logging
 
 LOG_FILE_NAME = "coach.log"
 STILL_ACTIVE = 259
@@ -203,6 +203,14 @@ def start_idle_exit_watchdog(server, minutes: float) -> None:
             print(
                 f"[coach] no web UI heartbeat for {minutes:g} min - shutting down"
             )
+            # the console window disappears with the process (double-click
+            # launches), so the retirement must also land in coach.log -
+            # "the site is still open but the cmd is gone" needs a record
+            logger.info(
+                "idle exit: no web-UI heartbeat for %g min; a frozen or "
+                "closed background tab both look the same from here",
+                minutes,
+            )
             server.should_exit = True
             return
 
@@ -244,7 +252,8 @@ def main(argv=None):
         metavar="MINUTES",
         help="shut down automatically after N minutes without a web-UI "
         "heartbeat, so closing the last browser tab retires the server "
-        "(0 disables; the bundled start.bat passes 0.5)",
+        "(0 disables; the bundled start.bat passes 2 - above the ~1/min "
+        "timer throttling browsers apply to hidden tabs)",
     )
     args = parser.parse_args(argv)
 

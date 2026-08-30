@@ -18,9 +18,9 @@ if not exist "web\dist\index.html" if not exist "server\webdist\index.html" (
 )
 
 if exist ".venv\Scripts\coach.exe" (
-    ".venv\Scripts\coach.exe" --idle-exit 0.5
+    ".venv\Scripts\coach.exe" --idle-exit 2
 ) else if exist ".venv\Scripts\python.exe" (
-    ".venv\Scripts\python.exe" cli.py --idle-exit 0.5
+    ".venv\Scripts\python.exe" cli.py --idle-exit 2
 ) else (
     echo AlgoCoach is not installed yet. One-time setup:
     echo   python -m venv .venv

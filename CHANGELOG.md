@@ -9,6 +9,14 @@ the full development history lives in the git log.
 
 ## [Unreleased]
 
+### Fixed
+
+- **CI flake in the heartbeat idle-clock test**: `after < before` raced
+  Windows CI's 15.6ms timer granularity (sleep(0.02) under-delivered and the
+  request itself took about as long, failing by nanoseconds). The test now
+  drives server.state's time source with a fake clock so the reset is
+  observable exactly; the reset-window test got a CI-tolerant 0.5s bound.
+
 ### Added
 
 - **User-defined problem groups (practice plans)**: a new 分组 page (between
@@ -41,6 +49,15 @@ the full development history lives in the git log.
   ships a ready-to-paste share code for the 代码随想录 practice plan
   (12 sections / 173 problems after the study guide's order, its 148
   article-introduced problems pre-marked as key) - documented in USAGE.
+
+### Changed
+
+- **Idle exit waits 2 minutes and leaves a trace**: start.bat's deadline
+  rises from 30s to 2 min - above the ~1/min timer throttling browsers apply
+  to hidden tabs, so a page left in the background no longer gets its server
+  retired under it ("site still open, cmd gone"). The watchdog also logs the
+  retirement into coach.log now (the console message used to vanish with the
+  window), so the cause is one glance away.
 
 ### Fixed
 
