@@ -1,6 +1,7 @@
 <script setup>
 import { computed } from 'vue'
 
+import StarIcon from './StarIcon.vue'
 import { difficultyClass, difficultyLabel } from '../utils/difficulty'
 import { useI18nStore } from '../stores/i18n'
 
@@ -53,7 +54,7 @@ function onToggleFavorite() {
         @click.stop.prevent="onToggleFavorite"
         @keydown.enter.stop.prevent="onToggleFavorite"
       >
-        {{ row.favorite ? '★' : '☆' }}
+        <StarIcon :filled="row.favorite" />
       </span>
       <span v-if="row.practice_status === 'accepted'" class="chip chip-ok pstatus" data-testid="status-solved">
         ✓ {{ i18n.t('status_solved') }}
@@ -142,8 +143,10 @@ function onToggleFavorite() {
 }
 
 .fav {
+  align-items: center;
   color: var(--gray-neutral);
   cursor: pointer;
+  display: inline-flex;
   font-size: var(--font-size-body);
   line-height: 1;
   user-select: none;

@@ -1,4 +1,5 @@
 <script setup>
+import StarIcon from './StarIcon.vue'
 import { useI18nStore } from '../stores/i18n'
 import { difficultyClass, difficultyLabel } from '../utils/difficulty'
 
@@ -22,7 +23,7 @@ const i18n = useI18nStore()
       data-testid="workbench-fav"
       @click="$emit('toggle-favorite')"
     >
-      {{ favorite ? '★' : '☆' }}
+      <StarIcon :filled="favorite" />
     </button>
     <RouterLink
       v-if="problem.difficulty"
@@ -64,10 +65,12 @@ const i18n = useI18nStore()
 }
 
 .fav-btn {
+  align-items: center;
   background: transparent;
   border: none;
   color: var(--gray-neutral);
   cursor: pointer;
+  display: inline-flex;
   font-size: var(--font-size-title);
   line-height: 1;
   padding: 0;
