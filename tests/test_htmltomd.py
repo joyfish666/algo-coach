@@ -50,6 +50,61 @@ def test_html_table_cells_keep_separator():
     assert "c | d" in md
 
 
+def test_html_table_becomes_gfm_table():
+    """Rows flushed as standalone paragraphs rendered as literal text in
+    markdown-it: no delimiter row, blank lines between rows. A full pipe
+    row plus a delimiter row after the first one renders as one table."""
+    html = (
+        "<table><tbody>"
+        "<tr><td>整数</td><td>二进制</td></tr>"
+        "<tr><td>43261596</td><td>00000010100101000001111010011100</td></tr>"
+        "<tr><td>964176192</td><td>00111001011110000010100101000000</td></tr>"
+        "</tbody></table>"
+    )
+    md = html_to_markdown(html)
+    lines = [line for line in md.splitlines() if line.strip()]
+    assert lines == [
+        "| 整数 | 二进制 |",
+        "| --- | --- |",
+        "| 43261596 | 00000010100101000001111010011100 |",
+        "| 964176192 | 00111001011110000010100101000000 |",
+    ]
+
+
+def test_html_table_with_whitespace_text_nodes():
+    """cn statements carry newlines/indentation between table tags; the
+    whitespace-only buffer used to emit a phantom leading "|" separator."""
+    html = (
+        "<table>\n<tr>\n<td>a</td>\n<td>b</td>\n</tr>\n"
+        "<tr>\n<td>c</td>\n<td>d</td>\n</tr>\n</table>\n"
+    )
+    md = html_to_markdown(html)
+    assert "| a | b |\n| --- | --- |\n| c | d |" in md
+
+
+def test_html_table_pipe_in_cell_is_escaped():
+    html = "<table><tr><td>a|b</td><td>c</td></tr></table>"
+    md = html_to_markdown(html)
+    assert "a\\|b" in md
+
+
+def test_html_table_heading_inside_cell_stays_inline():
+    """Block tags inside a cell must not flush mid-row or leak markers."""
+    html = "<table><tr><td><p>cell text</p></td><td>more</td></tr></table>"
+    md = html_to_markdown(html)
+    assert "| cell text | more |" in md
+
+
+def test_html_strong_inside_code_span_drops_markers():
+    """<code><strong>1</strong></code> emitted `**1**` - the markers land
+    inside the backticks and render as literal asterisks. Emphasis cannot
+    render inside a code span, so the markers are dropped."""
+    html = "<p>仅包含数字 <code><strong>1</strong></code> 的长度。</p>"
+    md = html_to_markdown(html)
+    assert "`1`" in md
+    assert "**" not in md
+
+
 def test_html_formula_superscript_stays_raw():
     html = "<p>x<sup>2</sup> + y<sub>1</sub> &lt; 3</p>"
     md = html_to_markdown(html)

@@ -33,7 +33,9 @@ from lc.langs import DEFAULT_LANGUAGE, LANGUAGE_REGISTRY, extension_for
 # statement.md is regenerable program output of lc.htmltomd; a change in its
 # output shape bumps this and open_problem lazily regenerates stored files
 # (online) so existing workspaces heal without user action
-STATEMENT_VERSION = 2
+# v3: GFM pipe tables (v2 rows rendered as literal text) + no literal "**"
+# inside code spans
+STATEMENT_VERSION = 3
 
 _DIR_NAME_RE = re.compile(r"^(\d+)-(.+)$")
 
