@@ -59,7 +59,7 @@ onMounted(() => {
   status.refresh().then(() => sync.adoptFromStatus(status.sync))
   window.addEventListener('algocoach:auth-expired', onAuthExpired)
   sendHeartbeat()
-  heartbeatTimer = setInterval(sendHeartbeat, 20000)
+  heartbeatTimer = setInterval(sendHeartbeat, 10000)
   document.addEventListener('visibilitychange', onVisibilityChange)
 })
 

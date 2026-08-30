@@ -244,7 +244,7 @@ def main(argv=None):
         metavar="MINUTES",
         help="shut down automatically after N minutes without a web-UI "
         "heartbeat, so closing the last browser tab retires the server "
-        "(0 disables; the bundled start.bat passes 2)",
+        "(0 disables; the bundled start.bat passes 0.5)",
     )
     args = parser.parse_args(argv)
 
