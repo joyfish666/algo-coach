@@ -52,6 +52,17 @@ the full development history lives in the git log.
 
 ### Fixed
 
+- Pasting a cookie without `csrftoken` (LEETCODE_SESSION only) poisoned the
+  whole session: leetcode.cn re-issues csrftoken on two domain variants, and
+  the duplicate made every cookie lookup raise CookieConflictError - the
+  rotation hook died on each response (no session or csrf persistence,
+  warning per request) and csrf header reads broke. Cookie lookups are now
+  conflict-tolerant, the jar collapses duplicates to the newest value, and
+  the site-issued token is adopted onto the session so judge submit carries
+  it.
+- Random pick no longer selects premium problems (their statement fetch
+  degrades to a premium error); it draws only from free rows within the
+  current filter and explains in a toast when every match is paid.
 - CI: the wheel-packaging job never installed node_modules, so every run
   failed at its first step (`vite: not found`) since the job was
   introduced; `npm ci` now runs before the frontend build.

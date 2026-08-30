@@ -102,8 +102,15 @@ watch(
 )
 
 function goRandom() {
-  const row = pickRandom(filtered.value)
-  if (row) router.push(`/problem/${row.slug}`)
+  // paid problems cannot be practiced (their statement fetch degrades to a
+  // premium error), so random pick draws only from free rows within the
+  // current filter result
+  const row = pickRandom(filtered.value.filter((item) => !item.paid_only))
+  if (!row) {
+    toast.error({ text: i18n.t('random_all_paid') })
+    return
+  }
+  router.push(`/problem/${row.slug}`)
 }
 
 async function onToggleFavorite({ slug, next }) {

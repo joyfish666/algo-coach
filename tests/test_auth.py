@@ -264,3 +264,33 @@ def test_merge_rotated_cookie_appends_missing_keys():
         "only=1", {"csrftoken": "t", "LEETCODE_SESSION": "s"}
     )
     assert merged == "only=1; csrftoken=t; LEETCODE_SESSION=s"
+
+
+def test_persist_rotated_cookies_tolerates_duplicate_csrftoken(monkeypatch):
+    """Regression: leetcode.cn sets csrftoken on two domain variants, and
+    jar.get('csrftoken') raised CookieConflictError inside the rotation hook -
+    no session or csrf persistence for the whole session, warning spam on
+    every response. The hook must dedupe, persist, and adopt the token."""
+
+    import lc.config as config
+
+    monkeypatch.setattr(config, "load", lambda *a, **k: {"cookie": "LEETCODE_SESSION=old"})
+    saved = []
+    monkeypatch.setattr(config, "save", lambda data, *a, **k: saved.append(dict(data)))
+
+    client = auth.configure("LEETCODE_SESSION=new-sess")
+    session = client.session
+    session.cookies.set("csrftoken", "tok-apex", domain="leetcode.cn", path="/")
+    session.cookies.set("csrftoken", "tok-www", domain=".leetcode.cn", path="/")
+
+    auth._last_persisted_cookie = None
+    auth._persist_rotated_cookies(client)  # must not raise
+
+    assert saved, "rotation must persist despite the duplicate cookies"
+    cookie = saved[0]["cookie"]
+    assert "LEETCODE_SESSION=new-sess" in cookie
+    assert "csrftoken=" in cookie
+    # the site-issued token was adopted onto the session headers
+    assert session.headers["X-CSRFToken"] in ("tok-apex", "tok-www")
+    # and the jar no longer conflicts on csrftoken
+    assert session.cookies.get("csrftoken") in ("tok-apex", "tok-www")

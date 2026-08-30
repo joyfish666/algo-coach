@@ -214,12 +214,22 @@ def _persist_rotated_cookies(client) -> None:
     """
     global _last_persisted_cookie
     from lc import config as config_module
+    from lc.cookies import dedupe_jar, jar_value
 
     jar = client.session.cookies
-    session_value = jar.get("LEETCODE_SESSION")
+    # cn re-issues csrftoken on two domain variants; the duplicates made
+    # jar.get(name) raise CookieConflictError and abort this whole hook -
+    # no session rotation persisted, no csrf token adopted, warning spam on
+    # every authenticated response. Collapse first, then read.
+    dedupe_jar(jar, names=("LEETCODE_SESSION", "csrftoken"))
+    session_value = jar_value(jar, "LEETCODE_SESSION")
     if not session_value:
         return
-    csrf_value = jar.get("csrftoken") or ""
+    csrf_value = jar_value(jar, "csrftoken")
+    if csrf_value and client.session.headers.get("X-CSRFToken") != csrf_value:
+        # users who paste only LEETCODE_SESSION start without a csrf header;
+        # adopt the site-issued token so judge submit carries it
+        client.session.headers["X-CSRFToken"] = csrf_value
     with _persist_lock:
         with config_module.update_lock():
             with _state_lock:

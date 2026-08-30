@@ -21,6 +21,8 @@ vi.mock('vue-router', () => ({
 }))
 
 import Problems from './Problems.vue'
+import { useI18nStore } from '../stores/i18n'
+import { useToastStore } from '../stores/toast'
 
 const ROWS = [
   {
@@ -48,15 +50,19 @@ const ROWS = [
   },
 ]
 
-async function mountProblems() {
+async function mountProblems(rows = ROWS) {
   apiMocks.getProblems.mockResolvedValue({
-    total: ROWS.length,
+    total: rows.length,
     synced_at: '2026-08-24T00:00:00+00:00',
-    problems: JSON.parse(JSON.stringify(ROWS)),
+    problems: JSON.parse(JSON.stringify(rows)),
   })
+  // one pinia shared by the app and the test file, so store assertions read
+  // the same instance the component pushes into
+  const pinia = createPinia()
+  setActivePinia(pinia)
   const wrapper = mount(Problems, {
     global: {
-      plugins: [createPinia()],
+      plugins: [pinia],
       stubs: {
         RouterLink: { template: '<a><slot/></a>' },
         Teleport: { template: '<div><slot/></div>' },
@@ -130,6 +136,19 @@ describe('Problems view', () => {
     expect(target).toMatch(/^\/problem\//)
     const slugs = ['two-sum', 'add-two-numbers', 'longest-substring']
     expect(slugs.some((slug) => target.endsWith(slug))).toBe(true)
+  })
+
+  it('random pick skips paid problems and explains when only paid remain', async () => {
+    const paidOnly = ROWS.map((row) => ({ ...row, paid_only: true }))
+    const wrapper = await mountProblems(paidOnly)
+    useI18nStore().set('zh')
+
+    await wrapper.find('[data-testid="random-btn"]').trigger('click')
+
+    // nothing free to pick: no navigation, and the reason lands in a toast
+    expect(pushSpy).not.toHaveBeenCalled()
+    const toast = useToastStore()
+    expect(toast.items.some((item) => item.text.includes('付费题'))).toBe(true)
   })
 
   it('random button is disabled when no problem matches the filters', async () => {

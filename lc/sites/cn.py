@@ -25,6 +25,7 @@ from lc.exceptions import (
     PremiumProblemError,
     ProblemNotFoundError,
 )
+from lc.cookies import jar_value
 from lc.i18n import t
 from lc.sites.base import SiteAdapter
 from lc.validate import is_safe_slug
@@ -310,10 +311,10 @@ class LeetCodeCnAdapter(SiteAdapter):
 
     def _csrf_token(self) -> str:
         try:
-            return self.client.session.cookies.get("csrftoken") or ""
+            token = jar_value(self.client.session.cookies, "csrftoken")
         except AttributeError:
-            token = self.client.default_headers.get("X-CSRFToken", "")
-            return token
+            token = ""
+        return token or self.client.default_headers.get("X-CSRFToken", "")
 
     def fetch_recent_submissions(self, limit: int = 20) -> list:
         """Site-side recent submissions (capability boundary: about 20)."""
