@@ -30,6 +30,12 @@ the full development history lives in the git log.
   `ProblemMetaRow`); the parent keeps orchestration only and the
   data-loss-prevention flush contracts are pinned by new tests.
 
+### Fixed
+
+- CI: the wheel-packaging job never installed node_modules, so every run
+  failed at its first step (`vite: not found`) since the job was
+  introduced; `npm ci` now runs before the frontend build.
+
 ## [0.1.0] - 2026-08-29
 
 ### Added

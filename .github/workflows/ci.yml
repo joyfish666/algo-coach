@@ -91,6 +91,9 @@ jobs:
       # the wheel packages server/webdist as package data; building it here
       # closes the gap where a maintainer skipped the manual copy step and
       # shipped a UI-less wheel that nothing detected
+      - name: Install dependencies
+        run: npm ci
+        working-directory: web
       - name: Build frontend into server/webdist
         run: npm run dist
         working-directory: web
